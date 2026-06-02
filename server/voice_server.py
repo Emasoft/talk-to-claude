@@ -50,28 +50,26 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import mlx_whisper
 from aiohttp import WSMsgType, web
-from mlx_qwen3_asr.session import Session
 
 # Baked default — identical to kDefaultToken in the iOS app. Override with
 # CLAUDE_VOICE_TOKEN or --token.
 DEFAULT_TOKEN = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
-MODEL_ID = "Qwen/Qwen3-ASR-0.6B"
+# Whisper-large-v3-turbo: strong on BOTH English and Italian (Qwen3-ASR mangled
+# Italian), auto-detects language per utterance, ~RTF 0.16 on M4 Pro.
+MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 SAMPLE_RATE = 16000
 MAX_TEXT_LEN = 8000
 
-# Biasing hint passed to the ASR — nudges it toward terminal/coding vocabulary
-# so words like "git", "npm", "tmux" aren't misheard ("git" -> "get").
-DEFAULT_CONTEXT = (
-    "The speaker is dictating terminal and coding instructions to Claude Code. "
-    "Likely words: git, npm, yarn, tmux, python, grep, cd, ls, commit, branch, "
-    "merge, rebase, build, test, lint, refactor, function, variable, import."
-)
+# Optional Whisper initial_prompt to bias vocabulary. Empty by default so
+# per-utterance language auto-detection (English/Italian) stays clean; a hint can
+# be set per-connection via the WS config if you want to nudge toward jargon.
+DEFAULT_CONTEXT = ""
 
 # Populated in main().
 TOKEN = DEFAULT_TOKEN
 TMUX = "tmux"
-SESSION: Session | None = None
 # All MLX work runs on ONE dedicated thread (max_workers=1): the model is loaded
 # there and every transcription runs there, so MLX's per-thread Metal stream
 # stays consistent. Calling MLX from an arbitrary pooled thread raises
@@ -217,17 +215,21 @@ class UtteranceSegmenter:
         self._speech_win = 0
 
 
-def _load_session(model_id: str):
-    """Create the Session ON the ASR worker thread (see ASR_EXECUTOR note)."""
-    global SESSION
-    SESSION = Session(model_id)
+def _load_model(model_id: str):
+    """Warm Whisper ON the ASR worker thread (see ASR_EXECUTOR note). mlx_whisper
+    caches the model by repo, so this one warm-up primes it and every later
+    transcription reuses it on this same thread (keeping the MLX stream stable)."""
+    mlx_whisper.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), path_or_hf_repo=model_id)
 
 
 def transcribe_utterance(audio: np.ndarray, context: str) -> str:
-    """Batch-transcribe one utterance with the resident model. Runs on the ASR thread."""
-    assert SESSION is not None
-    result = SESSION.transcribe(audio, context=context)
-    return (getattr(result, "text", "") or "").strip()
+    """Batch-transcribe one utterance with Whisper. Runs on the ASR thread.
+    Language is auto-detected per utterance (English / Italian / …)."""
+    opts = {"path_or_hf_repo": MODEL_ID}
+    if context:
+        opts["initial_prompt"] = context
+    result = mlx_whisper.transcribe(audio, **opts)
+    return (result.get("text", "") or "").strip()
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +395,7 @@ def make_app() -> web.Application:
 
 
 def main():
-    global TOKEN, TMUX, SESSION
+    global TOKEN, TMUX
 
     parser = argparse.ArgumentParser(description="Talk to Claude v2 voice server")
     parser.add_argument("--host", default=None, help="Bind address (default: Tailscale IP)")
@@ -411,11 +413,11 @@ def main():
     if insecure_bind:
         host = "0.0.0.0"
 
-    print("Loading Qwen3-ASR model (one-time)…", file=sys.stderr)
+    print(f"Loading Whisper model {args.model} (one-time)…", file=sys.stderr)
     t0 = time.time()
     # Load on the dedicated ASR thread so the model + all inference share one
     # MLX Metal stream.
-    ASR_EXECUTOR.submit(_load_session, args.model).result()
+    ASR_EXECUTOR.submit(_load_model, args.model).result()
     print(f"Model ready in {time.time() - t0:.1f}s", file=sys.stderr)
 
     print("─" * 64)

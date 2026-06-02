@@ -10,10 +10,19 @@ Talk continuously to a `claude` session from an iPhone/iPad over Tailscale.
 Audio is **streamed from the phone to the Mac** and **transcribed on the Mac**
 with a local MLX model. **Continuous auto-recognition — no push-to-talk.**
 
-## Engine decision: Qwen3-ASR-0.6B (MLX)
+## Engine decision: Whisper-large-v3-turbo (MLX)
+
+**Pivoted from Qwen3-ASR after on-hardware testing.** The research favored
+Qwen3-ASR-0.6B and it's flawless on English — but it badly mangles **Italian**
+(both 0.6B and 1.7B, even with a `language='it'` hint), a dealbreaker since the
+user mixes Italian and English. `mlx-whisper` running
+`mlx-community/whisper-large-v3-turbo` transcribes both languages accurately,
+auto-detects language per utterance, and runs at the **same speed** (RTF ~0.16 on
+M4 Pro, ~0.9 s for a 5 s utterance). It fits the VAD-segment-then-batch design
+perfectly. Original Qwen3 research kept below for context.
 
 Surveyed ~35 Apple-Silicon ASR projects (Parakeet, Whisper-MLX, Qwen3-ASR,
-SenseVoice, GigaAM, plus live-dictation apps and ready servers). Winner:
+SenseVoice, GigaAM, plus live-dictation apps and ready servers). Initial winner:
 **`moona3k/mlx-qwen3-asr`** (PyPI `mlx-qwen3-asr`, Apache-2.0) running
 `Qwen/Qwen3-ASR-0.6B`:
 
