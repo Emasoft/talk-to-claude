@@ -121,7 +121,10 @@ final class SpeechRecognizer: ObservableObject {
         task = nil
 
         let audioSession = AVAudioSession.sharedInstance()
-        try audioSession.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        // .record + the `audio` UIBackgroundMode keeps the mic alive when the app
+        // is backgrounded; .mixWithOthers lets you keep browsing/playing audio in
+        // other apps while we capture (we don't seize or silence their audio).
+        try audioSession.setCategory(.record, mode: .measurement, options: [.mixWithOthers])
         try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
 
         let req = SFSpeechAudioBufferRecognitionRequest()

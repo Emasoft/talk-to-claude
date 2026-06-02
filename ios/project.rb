@@ -41,6 +41,7 @@ target.build_configurations.each do |config|
   bs['SWIFT_VERSION'] = '5.0'
   bs['TARGETED_DEVICE_FAMILY'] = '1,2'
   bs['CODE_SIGN_STYLE'] = 'Automatic'
+  bs['DEVELOPMENT_TEAM'] = 'P2V8DD7FNW'  # Emasoft / Gaetano Sabetta signing team
   bs['ASSETCATALOG_COMPILER_APPICON_NAME'] = 'AppIcon'
   bs['ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME'] = 'AccentColor'
   bs['MARKETING_VERSION'] = '1.0'
