@@ -19,6 +19,8 @@ CASES = [
     ("italian maiuscolo", "maiuscolo errore", "ERRORE"),
     ("colon + semicolon IT", "due punti punto e virgola", ":;"),
     ("code fence + lang", "code block python new line print", "```python⟨Newline⟩print"),
+    ("triple backticks (plural)", "show me triple backticks", "show me ```"),
+    ("three backticks", "here three backticks", "here ```"),
     ("backslash", "backslash n", "\\n"),
     ("at + hash IT", "chiocciola cancelletto", "@#"),
     ("literal escapes command", "literal slash here", "slash here"),

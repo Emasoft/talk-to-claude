@@ -53,6 +53,8 @@ import numpy as np
 import mlx_whisper
 from aiohttp import WSMsgType, web
 
+from voice_commands import cheatsheet, interpret, render
+
 # Baked default — identical to kDefaultToken in the iOS app. Override with
 # CLAUDE_VOICE_TOKEN or --token.
 DEFAULT_TOKEN = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
@@ -112,6 +114,39 @@ def inject_text(session, text):
     code, _, err = tmux("send-keys", "-t", session, "Enter")
     if code != 0:
         return False, err or "send-keys (Enter) failed"
+    return True, ""
+
+
+KEY_MAP = {
+    "Enter": ["Enter"],
+    "Tab": ["Tab"],
+    "Escape": ["Escape"],
+    "BSpace": ["BSpace"],
+    # "Newline" = a line break in Claude Code WITHOUT submitting. Claude's TUI
+    # takes Option/Meta+Enter for that; change M-Enter here if your terminal differs.
+    "Newline": ["M-Enter"],
+}
+
+
+def execute_actions(session, actions):
+    """Run a verbal-command action list (typed text + key presses) into tmux.
+    Unlike inject_text this does NOT auto-press Enter — the prompt is submitted
+    only when the user says "invio"/"enter" (which produces an Enter key action)."""
+    for kind, value in actions:
+        if kind == "type":
+            text = value.replace("\r", " ").replace("\n", " ")
+            if not text:
+                continue
+            if len(text) > MAX_TEXT_LEN:
+                text = text[:MAX_TEXT_LEN]
+            code, _, err = tmux("send-keys", "-t", session, "-l", "--", text)
+            if code != 0:
+                return False, err or "send-keys (text) failed"
+        elif kind == "key":
+            keys = KEY_MAP.get(value, [value])
+            code, _, err = tmux("send-keys", "-t", session, *keys)
+            if code != 0:
+                return False, err or f"send-keys ({value}) failed"
     return True, ""
 
 
@@ -328,6 +363,7 @@ async def handle_stream(request):
     sample_rate = int(cfg.get("sample_rate") or SAMPLE_RATE)
     seg = UtteranceSegmenter(sample_rate=sample_rate)
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
+    await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate}", file=sys.stderr)
 
     try:
@@ -348,12 +384,13 @@ async def handle_stream(request):
                         await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
                         continue
                     if text:
-                        ok, err = inject_text(session, text)
+                        actions = interpret(text)
+                        ok, err = execute_actions(session, actions)
                         await ws.send_json(
-                            {"type": "final", "text": text, "injected": ok}
+                            {"type": "final", "text": text, "rendered": render(actions), "injected": ok}
                             | ({} if ok else {"error": err})
                         )
-                        print(f"[stream] -> {session}: {text!r}", file=sys.stderr)
+                        print(f"[stream] -> {session}: {text!r} => {render(actions)!r}", file=sys.stderr)
                     else:
                         await ws.send_json({"type": "final", "text": ""})
             elif msg.type == WSMsgType.TEXT:
