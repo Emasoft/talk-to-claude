@@ -468,7 +468,11 @@ def main():
         print("   ⚠️  No Tailscale IP detected — bound to 0.0.0.0. Pass --host <ip>.")
     print("─" * 64)
 
-    web.run_app(make_app(), host=host, port=args.port, print=None)
+    # access_log=None disables aiohttp's per-request logging. Without it, the
+    # app's /pane poll (every ~1.5 s) would append a log line forever and grow
+    # the log file unbounded on a long-running server. Our own meaningful events
+    # (connect/disconnect/utterances) are still printed to stderr.
+    web.run_app(make_app(), host=host, port=args.port, print=None, access_log=None)
 
 
 if __name__ == "__main__":
