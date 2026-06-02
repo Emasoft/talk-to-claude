@@ -65,23 +65,12 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Speaking") {
-                    Toggle("Auto-send on pause", isOn: $settings.autoSend)
-                    if settings.autoSend {
-                        VStack(alignment: .leading) {
-                            Text("Pause before sending: \(settings.pauseThreshold, specifier: "%.1f")s")
-                                .font(.caption)
-                            Slider(value: $settings.pauseThreshold, in: 0.5...3.0, step: 0.1)
-                        }
-                    }
-                }
-
                 Section("Display") {
                     Toggle("Show Claude's output", isOn: $settings.showReplies)
                 }
 
                 Section {
-                    Text("Audio is transcribed on-device and never leaves your phone. Only the resulting text is sent — over Tailscale's encrypted tunnel — to the Mac.")
+                    Text("Your voice is streamed to the Mac over Tailscale's encrypted tunnel and transcribed there by a local Whisper model — nothing leaves your network. The Mac detects speech pauses automatically, so just talk; no need to tap send.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

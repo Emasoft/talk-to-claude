@@ -1,20 +1,19 @@
 import SwiftUI
+import AVFoundation
 
 struct ContentView: View {
     @StateObject private var settings: AppSettings
-    @StateObject private var speech = SpeechRecognizer()
+    @StateObject private var voice: VoiceStream
     @StateObject private var claude: ClaudeClient
-
+    @State private var audio = AudioStreamer()
     @State private var showSettings = false
-    @State private var sentLog: [String] = []
 
     private let paneTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     init() {
-        // ClaudeClient needs the settings instance, so build both here and have
-        // the two StateObjects share one AppSettings.
         let s = AppSettings()
         _settings = StateObject(wrappedValue: s)
+        _voice = StateObject(wrappedValue: VoiceStream(settings: s))
         _claude = StateObject(wrappedValue: ClaudeClient(settings: s))
     }
 
@@ -22,9 +21,9 @@ struct ContentView: View {
         NavigationStack {
             VStack(spacing: 16) {
                 statusBar
-                transcriptCard
                 micControls
-                if !sentLog.isEmpty { sentLogCard }
+                if !voice.lastError.isEmpty { errorBanner }
+                if !voice.finals.isEmpty { sentCard }
                 if settings.showReplies { paneCard }
                 Spacer(minLength: 0)
             }
@@ -39,27 +38,31 @@ struct ContentView: View {
                 SettingsView(settings: settings, claude: claude)
             }
         }
-        .onAppear(perform: configure)
+        .onAppear {
+            AVAudioApplication.requestRecordPermission { _ in }
+            Task { await claude.checkHealth() }
+        }
         .onReceive(paneTimer) { _ in
-            guard settings.showReplies else { return }
+            guard settings.showReplies, voice.connected else { return }
             Task { await claude.loadPane(session: settings.session) }
         }
-        .onChange(of: settings.pauseThreshold) { _, newValue in speech.pauseThreshold = newValue }
-        .onChange(of: settings.autoSend) { _, newValue in speech.autoSend = newValue }
     }
 
-    // MARK: - Setup
-
-    private func configure() {
-        speech.requestAuthorization()
-        speech.pauseThreshold = settings.pauseThreshold
-        speech.autoSend = settings.autoSend
-        speech.onUtterance = { text in
-            sentLog.insert(text, at: 0)
-            if sentLog.count > 30 { sentLog.removeLast() }
-            Task { await claude.send(text, session: settings.session) }
+    private func toggleMic() {
+        if voice.listening {
+            audio.stop()
+            voice.stop()
+            UIApplication.shared.isIdleTimerDisabled = false
+        } else {
+            audio.onPCM = { [weak voice] data in voice?.sendPCM(data) }
+            do {
+                try audio.start()
+                voice.start(session: settings.session)
+                UIApplication.shared.isIdleTimerDisabled = true
+            } catch {
+                voice.lastError = "Mic start failed: \(error.localizedDescription)"
+            }
         }
-        Task { await claude.checkHealth() }
     }
 
     // MARK: - Subviews
@@ -67,9 +70,9 @@ struct ContentView: View {
     private var statusBar: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(claude.connected ? Color.green : Color.gray)
+                .fill(voice.connected ? .green : .gray)
                 .frame(width: 10, height: 10)
-            Text(claude.connected ? "Connected to \(settings.macIP)" : "Not connected")
+            Text(voice.connected ? "Connected to \(settings.macIP)" : "Not connected")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -79,67 +82,54 @@ struct ContentView: View {
         }
     }
 
-    private var transcriptCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(speech.status)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            ScrollView {
-                Text(speech.transcript.isEmpty ? "…" : speech.transcript)
-                    .font(.title3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 140)
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
-
     private var micControls: some View {
-        HStack(spacing: 24) {
-            Button(action: speech.toggle) {
+        VStack(spacing: 10) {
+            Button(action: toggleMic) {
                 ZStack {
                     Circle()
-                        .fill(speech.isListening ? Color.red : Color.accentColor)
-                        .frame(width: 96, height: 96)
-                        .shadow(radius: speech.isListening ? 12 : 4)
-                    Image(systemName: speech.isListening ? "waveform" : "mic.fill")
-                        .font(.system(size: 36, weight: .bold))
+                        .fill(voice.listening ? (voice.speaking ? Color.red : Color.orange) : Color.accentColor)
+                        .frame(width: 116, height: 116)
+                        .shadow(radius: voice.listening ? 14 : 4)
+                    Image(systemName: voice.listening ? "waveform" : "mic.fill")
+                        .font(.system(size: 42, weight: .bold))
                         .foregroundStyle(.white)
                 }
             }
-            .symbolEffect(.variableColor, isActive: speech.isListening)
-
-            if speech.isListening {
-                Button(action: speech.flush) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "paperplane.fill").font(.title2)
-                        Text("Send").font(.caption)
-                    }
-                    .frame(width: 72, height: 72)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                }
+            .symbolEffect(.variableColor, isActive: voice.speaking)
+            Text(voice.status)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            if voice.listening {
+                Text("You can switch to another app — it keeps streaming.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
-    private var sentLogCard: some View {
+    private var errorBanner: some View {
+        Text(voice.lastError)
+            .font(.caption)
+            .foregroundStyle(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var sentCard: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Sent")
+            Text("Sent to Claude")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(sentLog.enumerated()), id: \.offset) { _, line in
+                    ForEach(Array(voice.finals.enumerated()), id: \.offset) { _, line in
                         Text(line)
                             .font(.subheadline)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
-            .frame(maxHeight: 110)
+            .frame(maxHeight: 150)
         }
         .padding()
         .frame(maxWidth: .infinity)
@@ -157,7 +147,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
-            .frame(maxHeight: 200)
+            .frame(maxHeight: 220)
         }
         .padding()
         .frame(maxWidth: .infinity)
