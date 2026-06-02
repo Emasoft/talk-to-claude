@@ -388,12 +388,48 @@ def render(actions: list[tuple[str, str]]) -> str:
     return "".join(out)
 
 
+_KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "Escape": "esc", "BSpace": "⌫", "Newline": "⇧⏎"}
+
+
+def _rule_out(r: dict) -> str:
+    """Short literal 'what it types' for a rule (the blue chip in the app)."""
+    kind = r["kind"]
+    if kind == "char":
+        return r["char"]
+    if kind == "fence":
+        return "```"
+    if kind == "prefix":
+        return r["text"].strip()
+    if kind == "wrap":
+        return f'{r["open"]}…{r["close"]}'
+    if kind == "key":
+        return _KEY_GLYPH.get(r["key"], r["key"])
+    if kind == "case":
+        return {"upper": "ABC", "lower": "abc", "none": "—"}.get(r["mode"], "")
+    if kind == "case_once":
+        return "Aa"
+    if kind == "literal":
+        return "as-is"
+    if kind == "spell_on":
+        return "a·b·c"
+    if kind == "spell_off":
+        return "→ words"
+    if kind == "glue":
+        return "no␣"
+    return r.get("label", "")
+
+
 def cheatsheet() -> list[dict]:
-    """Grouped rules for the app to display: [{group, items:[{label, triggers}]}]."""
+    """Grouped rules for the app: [{group, items:[{say, out, label, triggers}]}]."""
     groups: dict[str, list[dict]] = {}
     for r in RULES:
         groups.setdefault(r["group"], []).append(
-            {"label": r["label"], "triggers": r["triggers"]}
+            {
+                "say": r["triggers"][0],
+                "out": _rule_out(r),
+                "label": r["label"],
+                "triggers": r["triggers"],
+            }
         )
     return [{"group": g, "items": items} for g, items in groups.items()]
 
