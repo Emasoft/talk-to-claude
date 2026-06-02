@@ -169,12 +169,60 @@ RULES: list[dict] = [
     # ── literal escape ───────────────────────────────────────────────────────
     {"group": "escape", "label": "literal next", "kind": "literal",
      "triggers": ["literal", "literally", "letterale", "letteralmente"]},
+
+    # ── spelling mode ────────────────────────────────────────────────────────
+    {"group": "spelling", "label": "spell ON", "kind": "spell_on",
+     "triggers": ["spell", "spelling", "spell mode", "spelling mode", "spell it",
+                  "spell out", "letter by letter", "compita", "compitazione",
+                  "modo lettere", "lettera per lettera"]},
+    {"group": "spelling", "label": "spell OFF", "kind": "spell_off",
+     "triggers": ["end spell", "end spelling", "stop spelling", "stop spell",
+                  "end letters", "normal mode", "fine compitazione", "fine lettere",
+                  "modo normale", "basta lettere"]},
 ]
 
 _PUNCT = ".,!?;:\"'()[]{}"
 # Closing brackets always get a space after them; connectors (/ ~ - . :) glue to
 # the following word (better for paths, filenames, key:value, domains).
 _CLOSERS = {")", "]", "}"}
+
+# In spelling mode only these command kinds still apply; everything else becomes a
+# letter (you're spelling a word, so "slash" etc. shouldn't be interpreted).
+_SPELL_OK = {"spell_off", "key", "case", "case_once"}
+_SPACE_WORDS = {"space", "spazio", "spacebar"}
+
+# Spoken letter names -> letters (English + Italian + common ASR mishearings).
+# Whisper transcribes spelled letters by their phonetic names ("L M R" -> "al em
+# er"); this maps them back. Unknown tokens pass through unchanged (so an
+# already-merged "cat" stays "cat").
+SPELL_MAP = {
+    "a": "a", "ay": "a", "eh": "a",
+    "b": "b", "bee": "b", "be": "b", "bi": "b",
+    "c": "c", "see": "c", "cee": "c", "ci": "c", "si": "c",
+    "d": "d", "dee": "d", "di": "d",
+    "e": "e", "ee": "e",
+    "f": "f", "ef": "f", "eff": "f", "effe": "f",
+    "g": "g", "gee": "g", "gi": "g", "ji": "g",
+    "h": "h", "aitch": "h", "acca": "h",
+    "i": "i", "eye": "i",
+    "j": "j", "jay": "j",
+    "k": "k", "kay": "k", "kappa": "k",
+    "l": "l", "el": "l", "ell": "l", "al": "l", "elle": "l",
+    "m": "m", "em": "m", "emme": "m",
+    "n": "n", "en": "n", "enne": "n",
+    "o": "o", "oh": "o",
+    "p": "p", "pee": "p", "pi": "p",
+    "q": "q", "cue": "q", "queue": "q", "cu": "q", "qu": "q",
+    "r": "r", "ar": "r", "are": "r", "er": "r", "erre": "r",
+    "s": "s", "es": "s", "ess": "s", "esse": "s",
+    "t": "t", "tee": "t", "ti": "t",
+    "u": "u", "you": "u", "yu": "u",
+    "v": "v", "vee": "v", "vu": "v", "vi": "v",
+    "w": "w", "doubleu": "w", "dub": "w",
+    "x": "x", "ex": "x", "ics": "x", "ix": "x",
+    "y": "y", "why": "y", "wy": "y", "ipsilon": "y",
+    "z": "z", "zee": "z", "zed": "z", "zeta": "z",
+}
 
 
 def _fold(s: str) -> str:
@@ -241,6 +289,20 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
             next_glue = False  # a wrapped group is complete — space before the next word
             pending_close = None
 
+    spelling = False
+
+    def emit_letter(ch: str):
+        nonlocal next_glue, cap_once
+        if case_mode == "upper":
+            ch = ch.upper()
+        elif case_mode == "lower":
+            ch = ch.lower()
+        elif cap_once:
+            ch = ch.upper()
+            cap_once = False
+        buf.append((ch, next_glue))  # 1st letter spaces from prior word; rest glue
+        next_glue = True
+
     i = 0
     while i < n:
         if literal_once:
@@ -257,6 +319,17 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
                 matched, mlen = _PHRASES[phrase], w
                 break
 
+        # Spelling mode: most tokens become letters; only a few commands apply.
+        if spelling and (matched is None or matched["kind"] not in _SPELL_OK):
+            tok = _norm(tokens[i])
+            if tok in _SPACE_WORDS:
+                buf.append((" ", next_glue))
+                next_glue = True
+            else:
+                emit_letter(SPELL_MAP.get(tok, tok))
+            i += 1
+            continue
+
         if matched is None:
             emit_word(tokens[i])
             i += 1
@@ -264,16 +337,18 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
 
         i += mlen
         kind = matched["kind"]
-        if kind == "char":
+        if kind == "spell_on":
+            spelling = True
+        elif kind == "spell_off":
+            spelling = False
+        elif kind == "char":
             emit_symbol(matched["char"])
         elif kind == "fence":
-            # Don't glue the fence to the previous word ("a ```python", not
-            # "a```python"), but do glue an immediately following language word.
+            # fence glues a following language word ("```python") but not the prev.
             buf.append(("```", next_glue))
             next_glue = True
         elif kind == "prefix":
-            # Markdown line prefixes like "## " / "- " / "> " — already end with a
-            # space, so glue the following text directly after them.
+            # markdown line prefixes ("## " / "- " / "> ") already end with a space.
             buf.append((matched["text"], next_glue))
             next_glue = True
         elif kind == "key":
