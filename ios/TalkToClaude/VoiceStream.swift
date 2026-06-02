@@ -26,6 +26,12 @@ final class VoiceStream: ObservableObject {
 
     init(settings: AppSettings) {
         self.settings = settings
+        // Show the cheat sheet immediately from the last-cached copy; it refreshes
+        // when we connect.
+        if let data = UserDefaults.standard.data(forKey: "cheatsheet"),
+           let groups = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+            cheatGroups = groups.compactMap(CheatGroup.from(json:))
+        }
     }
 
     func start(session: String) {
@@ -118,6 +124,9 @@ final class VoiceStream: ObservableObject {
         case "cheatsheet":
             if let groups = obj["groups"] as? [[String: Any]] {
                 cheatGroups = groups.compactMap(CheatGroup.from(json:))
+                if let data = try? JSONSerialization.data(withJSONObject: groups) {
+                    UserDefaults.standard.set(data, forKey: "cheatsheet")
+                }
             }
         case "mode":
             spellMode = (obj["spell"] as? Bool) ?? false
