@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var audio = AudioStreamer()
     @State private var showSettings = false
     @State private var showCheatSheet = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private let paneTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
@@ -52,6 +53,16 @@ struct ContentView: View {
         .onReceive(paneTimer) { _ in
             guard settings.showReplies, voice.connected else { return }
             Task { await claude.loadPane(session: settings.session) }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Foreground-only: release the mic + audio session the moment we leave
+            // the foreground so other apps immediately regain audio. (A background
+            // mic session keeps every other app interrupted until we're quit.)
+            if phase == .background && voice.listening {
+                audio.stop()
+                voice.stop()
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
         }
     }
 
@@ -119,9 +130,10 @@ struct ContentView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if voice.listening {
-                Text("You can switch to another app — it keeps streaming.")
+                Text("Keep this app in front while you talk (on iPad, use Split View next to other apps).")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
             }
         }
         .padding(.vertical, 6)
