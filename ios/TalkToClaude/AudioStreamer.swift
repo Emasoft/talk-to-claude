@@ -20,28 +20,45 @@ final class AudioStreamer {
 
     func start() throws {
         guard !isRunning else { return }
-
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [.mixWithOthers])
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        do {
+            // .playAndRecord + .mixWithOthers lets OTHER apps keep playing audio
+            // while we capture. A plain .record/.measurement session takes the
+            // audio route exclusively and freezes everyone else (TikTok, music…).
+            try session.setCategory(
+                .playAndRecord,
+                mode: .default,
+                options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth]
+            )
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
 
-        let input = engine.inputNode
-        let hwFormat = input.outputFormat(forBus: 0)
-        converter = AVAudioConverter(from: hwFormat, to: targetFormat)
-
-        input.removeTap(onBus: 0)
-        input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
-            self?.process(buffer)
+            let input = engine.inputNode
+            let hwFormat = input.outputFormat(forBus: 0)
+            converter = AVAudioConverter(from: hwFormat, to: targetFormat)
+            input.removeTap(onBus: 0)
+            input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
+                self?.process(buffer)
+            }
+            engine.prepare()
+            try engine.start()
+            isRunning = true
+        } catch {
+            // Never leave the session active without actually recording — that
+            // would keep other apps frozen even though we're "not recording".
+            teardown()
+            throw error
         }
-        engine.prepare()
-        try engine.start()
-        isRunning = true
     }
 
     func stop() {
-        guard isRunning else { return }
+        teardown()
+    }
+
+    /// Fully release audio so other apps regain playback. Idempotent — safe to
+    /// call even if we never finished starting.
+    private func teardown() {
+        if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
         converter = nil
         isRunning = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
