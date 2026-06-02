@@ -6,7 +6,9 @@ from voice_commands import interpret, render
 CASES = [
     ("slash command", "slash context", "/context"),
     ("path with dashes", "tilde slash Code slash my dash project slash", "~/Code/my-project/"),
-    ("italian slash (barra)", "barra context", "/context"),
+    ("barra is pipe (IT)", "ls barra grep foo", "ls|grep foo"),
+    ("barra rovesciata = backslash", "barra rovesciata n", "\\n"),
+    ("shift-invio newline (hyphen)", "uno shift-invio due", "uno⟨Newline⟩due"),
     ("italian enter (invio)", "git status invio", "git status⟨Enter⟩"),
     ("english enter", "run the tests submit", "run the tests⟨Enter⟩"),
     ("open/close paren", "open paren foo close paren", "(foo)"),

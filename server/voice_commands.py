@@ -27,8 +27,8 @@ RULES: list[dict] = [
      "triggers": ["enter", "submit", "send", "send it", "go ahead",
                   "invio", "invia", "manda", "manda messaggio"]},
     {"group": "keys", "label": "newline ⇧⏎", "kind": "key", "key": "Newline",
-     "triggers": ["new line", "newline", "line break", "shift enter",
-                  "a capo", "nuova riga", "shift invio", "vai a capo"]},
+     "triggers": ["new line", "newline", "line break", "shift enter", "shift-enter",
+                  "a capo", "nuova riga", "shift invio", "shift-invio", "vai a capo"]},
     {"group": "keys", "label": "tab", "kind": "key", "key": "Tab",
      "triggers": ["tab", "tabulazione"]},
     {"group": "keys", "label": "escape", "kind": "key", "key": "Escape",
@@ -38,7 +38,7 @@ RULES: list[dict] = [
 
     # ── slashes / paths ──────────────────────────────────────────────────────
     {"group": "paths", "label": "/", "kind": "char", "char": "/",
-     "triggers": ["slash", "forward slash", "barra"]},
+     "triggers": ["slash", "forward slash"]},
     {"group": "paths", "label": "\\", "kind": "char", "char": "\\",
      "triggers": ["backslash", "barra rovesciata", "barra inversa"]},
     {"group": "paths", "label": "~", "kind": "char", "char": "~",
@@ -56,7 +56,7 @@ RULES: list[dict] = [
 
     # ── symbols ──────────────────────────────────────────────────────────────
     {"group": "symbols", "label": "@", "kind": "char", "char": "@",
-     "triggers": ["at", "at sign", "chiocciola"]},
+     "triggers": ["at sign", "chiocciola"]},  # bare "at" is too common in prose
     {"group": "symbols", "label": "#", "kind": "char", "char": "#",
      "triggers": ["hash", "pound", "number sign", "cancelletto", "diesis"]},
     {"group": "symbols", "label": "$", "kind": "char", "char": "$",
@@ -70,7 +70,7 @@ RULES: list[dict] = [
     {"group": "symbols", "label": "*", "kind": "char", "char": "*",
      "triggers": ["star", "asterisk", "asterisco"]},
     {"group": "symbols", "label": "|", "kind": "char", "char": "|",
-     "triggers": ["pipe", "vertical bar", "barra verticale"]},
+     "triggers": ["pipe", "vertical bar", "barra verticale", "barra"]},
     {"group": "symbols", "label": "+", "kind": "char", "char": "+",
      "triggers": ["plus", "più", "piu"]},
     {"group": "symbols", "label": "=", "kind": "char", "char": "=",
