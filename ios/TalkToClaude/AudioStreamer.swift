@@ -22,14 +22,16 @@ final class AudioStreamer {
         guard !isRunning else { return }
         let session = AVAudioSession.sharedInstance()
         do {
-            // .playAndRecord + .mixWithOthers lets OTHER apps keep playing audio
-            // while we capture. .voiceChat mode turns on hardware voice processing
-            // (acoustic echo cancellation + noise suppression), so the other
-            // panel's audio coming out of the speaker is subtracted from the mic.
+            // .duckOthers drops other apps' volume low while we record (so the
+            // user's voice dominates the mic, instead of the other panel's audio),
+            // then restores it when we stop — without freezing them. .voiceChat
+            // mode adds noise suppression / AGC on top. The mic still physically
+            // hears whatever the speaker plays, so for a truly clean signal use
+            // headphones (the other audio then never reaches the speaker/mic).
             try session.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,
-                options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth]
+                options: [.duckOthers, .defaultToSpeaker, .allowBluetooth]
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
