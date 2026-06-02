@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Convenience launcher for the Talk to Claude receiver.
-# Auto-detects the Tailscale IP and starts the stdlib HTTP server.
-# Pass extra flags straight through, e.g.:  ./run.sh --port 9000 --token mysecret
+# Launch the Talk to Claude v2 voice server (Qwen3-ASR streaming -> tmux).
+# Auto-detects the Tailscale IP. Pass extra flags through, e.g.:
+#   ./run.sh --port 9000 --token mysecret
 set -euo pipefail
-cd "$(dirname "$0")"
-exec python3 claude_voice_server.py "$@"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+exec uv run --project "$ROOT" python "$ROOT/server/voice_server.py" "$@"

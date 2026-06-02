@@ -1,0 +1,13 @@
+[project]
+name = "claude-voice-server"
+version = "2.0.0"
+description = "Streaming voice -> Qwen3-ASR (MLX) -> tmux Claude injection server"
+requires-python = ">=3.12"
+dependencies = [
+    "mlx-qwen3-asr>=0.3.5",
+    "aiohttp>=3.10",
+    "numpy>=2.0",
+]
+
+[tool.uv]
+package = false
