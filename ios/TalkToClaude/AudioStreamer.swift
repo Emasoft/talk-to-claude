@@ -23,16 +23,18 @@ final class AudioStreamer {
         let session = AVAudioSession.sharedInstance()
         do {
             // .playAndRecord + .mixWithOthers lets OTHER apps keep playing audio
-            // while we capture. A plain .record/.measurement session takes the
-            // audio route exclusively and freezes everyone else (TikTok, music…).
+            // while we capture. .voiceChat mode turns on hardware voice processing
+            // (acoustic echo cancellation + noise suppression), so the other
+            // panel's audio coming out of the speaker is subtracted from the mic.
             try session.setCategory(
                 .playAndRecord,
-                mode: .default,
+                mode: .voiceChat,
                 options: [.mixWithOthers, .defaultToSpeaker, .allowBluetooth]
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
             let input = engine.inputNode
+            try? input.setVoiceProcessingEnabled(true)  // belt-and-braces AEC/NS
             let hwFormat = input.outputFormat(forBus: 0)
             converter = AVAudioConverter(from: hwFormat, to: targetFormat)
             input.removeTap(onBus: 0)
