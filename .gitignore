@@ -1,0 +1,30 @@
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+**/xcuserdata/
+*.xcscmblueprint
+*.moved-aside
+
+# The .xcodeproj is generated from ios/project.rb — keep it out of git.
+ios/TalkToClaude.xcodeproj/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Dev scratch (gitignored per workspace convention)
+docs_dev/
+reports/
+reports_dev/
+
+# Python venv / model caches
+.venv/
+models/
+*.safetensors
+
+# Secrets / local overrides
+.env

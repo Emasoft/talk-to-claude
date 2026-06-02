@@ -1,0 +1,43 @@
+import Foundation
+import Combine
+
+/// Default shared secret, generated at project-creation time. It is baked into
+/// BOTH this app and `server/claude_voice_server.py` so the pair works with zero
+/// configuration on first run. Change it in Settings (and pass the same value to
+/// the server via CLAUDE_VOICE_TOKEN / --token) if you want a different secret.
+let kDefaultToken = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
+
+/// Default Tailscale IPv4 of the Mac running the receiver. Editable in Settings.
+let kDefaultMacIP = "100.99.233.43"
+
+/// User-editable configuration, persisted in UserDefaults. Implemented with
+/// plain @Published + didSet (rather than @AppStorage) so the object reliably
+/// publishes changes to every observing view — @AppStorage only behaves
+/// correctly when used directly inside a View.
+@MainActor
+final class AppSettings: ObservableObject {
+    private let store = UserDefaults.standard
+
+    @Published var macIP: String { didSet { store.set(macIP, forKey: "macIP") } }
+    @Published var port: String { didSet { store.set(port, forKey: "port") } }
+    @Published var token: String { didSet { store.set(token, forKey: "token") } }
+    @Published var session: String { didSet { store.set(session, forKey: "session") } }
+    @Published var pauseThreshold: Double { didSet { store.set(pauseThreshold, forKey: "pauseThreshold") } }
+    @Published var autoSend: Bool { didSet { store.set(autoSend, forKey: "autoSend") } }
+    @Published var showReplies: Bool { didSet { store.set(showReplies, forKey: "showReplies") } }
+
+    init() {
+        // didSet does not fire for assignments made inside init, so these reads
+        // do not re-persist the defaults — they only seed the in-memory values.
+        macIP = store.string(forKey: "macIP") ?? kDefaultMacIP
+        port = store.string(forKey: "port") ?? "8765"
+        token = store.string(forKey: "token") ?? kDefaultToken
+        session = store.string(forKey: "session") ?? "default"
+        pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 1.2
+        autoSend = store.object(forKey: "autoSend") as? Bool ?? true
+        showReplies = store.object(forKey: "showReplies") as? Bool ?? true
+    }
+
+    /// Port parsed to an Int, falling back to the default if the field is junk.
+    var portNumber: Int { Int(port) ?? 8765 }
+}
