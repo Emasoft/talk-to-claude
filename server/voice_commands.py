@@ -135,12 +135,15 @@ RULES: list[dict] = [
 
     # ── case / naming ────────────────────────────────────────────────────────
     {"group": "case", "label": "ALL CAPS", "kind": "case", "mode": "upper",
-     "triggers": ["all caps", "caps on", "caps lock", "uppercase",
-                  "maiuscolo", "tutto maiuscolo", "maiuscole"]},
+     "triggers": ["all caps", "caps on", "caps lock", "caps mode", "uppercase",
+                  "uppercase mode", "maiuscolo", "tutto maiuscolo", "maiuscole",
+                  "modo maiuscolo"]},
     {"group": "case", "label": "lower", "kind": "case", "mode": "lower",
-     "triggers": ["lowercase", "minuscolo", "minuscole"]},
+     "triggers": ["lowercase", "lowercase mode", "minuscolo", "minuscole",
+                  "modo minuscolo"]},
     {"group": "case", "label": "caps off", "kind": "case", "mode": "none",
-     "triggers": ["caps off", "end caps", "normal case", "normale"]},
+     "triggers": ["caps off", "caps mode stop", "caps mode off", "stop caps",
+                  "end caps", "normal case", "normale"]},
     {"group": "case", "label": "Capitalize next", "kind": "case_once", "mode": "cap",
      "triggers": ["capital", "capitalize", "maiuscola"]},
 
@@ -177,8 +180,8 @@ RULES: list[dict] = [
                   "modo lettere", "lettera per lettera"]},
     {"group": "spelling", "label": "spell OFF", "kind": "spell_off",
      "triggers": ["end spell", "end spelling", "stop spelling", "stop spell",
-                  "end letters", "normal mode", "fine compitazione", "fine lettere",
-                  "modo normale", "basta lettere"]},
+                  "spell mode stop", "spell mode off", "end letters", "normal mode",
+                  "fine compitazione", "fine lettere", "modo normale", "basta lettere"]},
 ]
 
 _PUNCT = ".,!?;:\"'()[]{}"
@@ -203,7 +206,7 @@ SPELL_MAP = {
     "e": "e", "ee": "e",
     "f": "f", "ef": "f", "eff": "f", "effe": "f",
     "g": "g", "gee": "g", "gi": "g", "ji": "g",
-    "h": "h", "aitch": "h", "acca": "h",
+    "h": "h", "aitch": "h", "eich": "h", "acca": "h",
     "i": "i", "eye": "i",
     "j": "j", "jay": "j",
     "k": "k", "kay": "k", "kappa": "k",
