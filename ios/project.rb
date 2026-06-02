@@ -27,6 +27,10 @@ end
 assets = File.join(src_dir, 'Assets.xcassets')
 target.add_resources([group.new_reference(assets)]) if File.exist?(assets)
 
+# Bundled default cheat sheet (so the grid shows offline on first launch)
+cheat = File.join(src_dir, 'cheatsheet.json')
+target.add_resources([group.new_reference(cheat)]) if File.exist?(cheat)
+
 # Info.plist -> visible in the navigator, but consumed via INFOPLIST_FILE (not a
 # build file).
 group.new_reference(File.join(src_dir, 'Info.plist'))

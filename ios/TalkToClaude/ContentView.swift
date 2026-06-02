@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showSearch = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var hSize
 
     init() {
         let s = AppSettings()
@@ -18,41 +19,15 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 8) {
-                statusBar
-                micRow
-                if let last = voice.finals.first {
-                    Text(last)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                cheatSheet
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 6)
-            .navigationTitle("Talk to Claude")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                }
-            }
-            .sheet(isPresented: $showSettings) { SettingsView(settings: settings, claude: claude) }
-            .sheet(isPresented: $showSearch) { CheatSheetView(groups: voice.cheatGroups) }
+        VStack(spacing: 0) {
+            cheatSheet
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            bottomBar
         }
-        .onAppear {
-            AVAudioApplication.requestRecordPermission { _ in }
-        }
+        .sheet(isPresented: $showSettings) { SettingsView(settings: settings, claude: claude) }
+        .sheet(isPresented: $showSearch) { CheatSheetView(groups: voice.cheatGroups) }
+        .onAppear { AVAudioApplication.requestRecordPermission { _ in } }
         .onChange(of: scenePhase) { _, phase in
-            // Foreground-only: release mic/session when backgrounded so other apps
-            // immediately regain audio.
             if phase == .background && voice.listening {
                 audio.stop()
                 voice.stop()
@@ -78,110 +53,107 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Top bar
+    // MARK: - Cheat sheet (fills the screen)
 
-    private var statusBar: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(voice.connected ? .green : .gray)
-                .frame(width: 9, height: 9)
-            Text(voice.connected ? "Connected" : "Not connected")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
-            if voice.capsMode == "lower" { modeBadge("abc", .blue) }
-            if voice.spellMode { modeBadge("SPELL", .purple) }
-            Spacer()
-            Text("▸ \(settings.session)")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+    private var cheatSheet: some View {
+        GeometryReader { geo in
+            let cols = columnCount(for: geo.size.width)
+            let big = geo.size.width >= 980
+            let grid = Array(repeating: GridItem(.flexible(), spacing: 4), count: cols)
+            ScrollView {
+                if voice.cheatGroups.isEmpty {
+                    Text("Tap the mic once to load the command list.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity).padding(.top, 24)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(voice.cheatGroups) { group in
+                            Text(group.group.uppercased())
+                                .font(.system(size: 9, weight: .heavy))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 1)
+                            LazyVGrid(columns: grid, spacing: 4) {
+                                ForEach(group.items) { item in cheatCell(item, big: big) }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 10)
+                }
+            }
         }
     }
 
-    private func modeBadge(_ text: String, _ color: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.2), in: Capsule())
-            .foregroundStyle(color)
+    /// 6 columns wide (full-screen iPad/landscape), 3 narrow (iPhone / Split View).
+    private func columnCount(for width: CGFloat) -> Int {
+        if width >= 980 { return 6 }
+        if width >= 680 { return 4 }
+        return 3
     }
 
-    private var micRow: some View {
-        HStack(spacing: 14) {
+    private func cheatCell(_ item: CheatItem, big: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(item.triggers.first ?? item.label)
+                .font(.system(size: big ? 13 : 11, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.6)
+            Text(item.label)
+                .font(.system(size: big ? 12 : 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity, minHeight: big ? 38 : 30, alignment: .leading)
+        .padding(.horizontal, big ? 8 : 5).padding(.vertical, big ? 5 : 3)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: - Compact bottom control bar
+
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
             Button(action: toggleMic) {
                 ZStack {
                     Circle()
                         .fill(voice.listening ? (voice.speaking ? Color.red : Color.orange) : Color.accentColor)
-                        .frame(width: 60, height: 60)
-                        .shadow(radius: voice.listening ? 8 : 3)
+                        .frame(width: 46, height: 46)
                     Image(systemName: voice.listening ? "waveform" : "mic.fill")
-                        .font(.system(size: 24, weight: .bold))
+                        .font(.system(size: 19, weight: .bold))
                         .foregroundStyle(.white)
                 }
             }
             .symbolEffect(.variableColor, isActive: voice.speaking)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(voice.status).font(.subheadline)
-                if !voice.lastError.isEmpty {
-                    Text(voice.lastError).font(.caption2).foregroundStyle(.red).lineLimit(2)
-                } else if voice.listening {
-                    Text("Keep the app in front (use Split View next to other apps).")
-                        .font(.caption2).foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Circle().fill(voice.connected ? .green : .gray).frame(width: 8, height: 8)
+                    Text(voice.connected ? "Connected" : (voice.listening ? voice.status : "Tap to talk"))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
+                    if voice.capsMode == "lower" { modeBadge("abc", .blue) }
+                    if voice.spellMode { modeBadge("SPELL", .purple) }
                 }
+                Text(voice.finals.first ?? "—")
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .foregroundStyle(.primary)
             }
-            Spacer()
+            Spacer(minLength: 4)
+            Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
+            Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                .padding(.leading, 2)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
-    // MARK: - Always-visible cheat sheet
-
-    private var cheatSheet: some View {
-        GeometryReader { geo in
-            let cols = geo.size.width >= 700 ? 6 : 3
-            let grid = Array(repeating: GridItem(.flexible(), spacing: 4), count: cols)
-            ScrollView {
-                if voice.cheatGroups.isEmpty {
-                    Text("Tap the mic once to load the command list.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 24)
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(voice.cheatGroups) { group in
-                            Text(group.group.uppercased())
-                                .font(.system(size: 9, weight: .heavy))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 2)
-                            LazyVGrid(columns: grid, spacing: 4) {
-                                ForEach(group.items) { item in cheatCell(item) }
-                            }
-                        }
-                    }
-                    .padding(.bottom, 12)
-                }
-            }
-        }
-    }
-
-    private func cheatCell(_ item: CheatItem) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(item.triggers.first ?? item.label)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-            Text(item.label)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+    private func modeBadge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(color.opacity(0.2), in: Capsule())
+            .foregroundStyle(color)
     }
 }
 
