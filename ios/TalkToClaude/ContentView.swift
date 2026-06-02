@@ -20,7 +20,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            Self.purpleGradient.ignoresSafeArea()
+            Self.silkBackground.ignoresSafeArea()
             VStack(spacing: 0) {
                 cheatSheet
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,15 +41,41 @@ struct ContentView: View {
         }
     }
 
-    // Fixed purple gradient + desaturated glass palette (identical in light & dark).
-    static let purpleGradient = LinearGradient(
-        colors: [Color(red: 0.17, green: 0.10, blue: 0.32),
-                 Color(red: 0.40, green: 0.20, blue: 0.60),
-                 Color(red: 0.24, green: 0.12, blue: 0.42)],
-        startPoint: .top, endPoint: .bottom)
+    // Fixed blue-silk background + glass-chip palette (identical in light & dark).
+    static let silkDark = Color(red: 0.01, green: 0.09, blue: 0.24)   // fold valleys
+    static let silkDeep = Color(red: 0.03, green: 0.24, blue: 0.46)
+    static let silkAzure = Color(red: 0.08, green: 0.45, blue: 0.72)
+    static let silkBright = Color(red: 0.20, green: 0.64, blue: 0.88)
+    static let silkHi = Color(red: 0.60, green: 0.85, blue: 1.0)     // specular highlights
     static let glassYellow = Color(hue: 0.13, saturation: 0.55, brightness: 1.0)
-    static let glassBlue = Color(hue: 0.58, saturation: 0.50, brightness: 0.92)
-    static let glassRed = Color(hue: 0.99, saturation: 0.55, brightness: 0.88)
+    static let chipSay = Color(red: 0.05, green: 0.08, blue: 0.20)   // very dark navy (phrase side)
+    static let chipOut = Color(red: 0.38, green: 0.52, blue: 0.70)   // light steel (output side)
+    static let chipStop = Color(red: 0.60, green: 0.22, blue: 0.26)  // muted red (STOP output)
+    static let glassEdge = LinearGradient(
+        colors: [.white.opacity(0.65), .white.opacity(0.12)],
+        startPoint: .top, endPoint: .bottom)
+
+    /// Flowing blue satin via a mesh of blues (sheen + folds). Linear fallback < iOS 18.
+    @ViewBuilder static var silkBackground: some View {
+        if #available(iOS 18.0, *) {
+            // 4×4 mesh: bright speculars and dark valleys alternate on the diagonal so
+            // the blend reads as flowing satin folds rather than a flat gradient.
+            MeshGradient(width: 4, height: 4, points: [
+                SIMD2<Float>(0, 0), SIMD2<Float>(0.33, 0), SIMD2<Float>(0.66, 0), SIMD2<Float>(1, 0),
+                SIMD2<Float>(0, 0.34), SIMD2<Float>(0.26, 0.30), SIMD2<Float>(0.68, 0.38), SIMD2<Float>(1, 0.31),
+                SIMD2<Float>(0, 0.66), SIMD2<Float>(0.34, 0.71), SIMD2<Float>(0.73, 0.61), SIMD2<Float>(1, 0.69),
+                SIMD2<Float>(0, 1), SIMD2<Float>(0.33, 1), SIMD2<Float>(0.66, 1), SIMD2<Float>(1, 1),
+            ], colors: [
+                silkBright, silkDeep, silkDark, silkAzure,
+                silkAzure, silkHi, silkBright, silkDark,
+                silkDark, silkBright, silkHi, silkDeep,
+                silkDeep, silkDark, silkAzure, silkBright,
+            ])
+        } else {
+            LinearGradient(colors: [silkDark, silkBright, silkAzure, silkDeep],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+    }
 
     private func toggleMic() {
         if voice.listening {
@@ -76,8 +102,8 @@ struct ContentView: View {
             let all = voice.cheatGroups.flatMap { $0.items }
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
-            let font: CGFloat = big ? 19 : 13
-            let pairW: CGFloat = big ? 320 : 184
+            let font: CGFloat = big ? 19 : 12
+            let pairW: CGFloat = big ? 320 : 178
             ScrollView {
                 if all.isEmpty {
                     Text("Tap the mic once to load the command list.")
@@ -114,50 +140,68 @@ struct ContentView: View {
         }
     }
 
-    /// One-line glass chip: spoken phrase (soft yellow) + output (desaturated-blue tag).
+    /// Bicolor chip: phrase (dark-indigo glass) and output (steel glass) meet along a
+    /// diagonal slant, wrapped in glass chrome (frosted material + lit edge + shadow).
     private func singleCell(_ item: CheatItem, fontSize: CGFloat) -> some View {
-        HStack(spacing: 5) {
-            Text(item.say)
-                .fontWeight(.semibold).foregroundStyle(Self.glassYellow)
-            Text(item.out)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Self.glassBlue.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
-        }
-        .font(.system(size: fontSize))
-        .lineLimit(1)
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
+        glassChrome(
+            slantBicolor(say: item.say, out: item.out, outColor: Self.chipOut,
+                         fontSize: fontSize, sayFills: false)
+        )
         .fixedSize()
     }
 
-    /// A START/STOP mode as one fixed-width two-row glass cell: START on top
-    /// (blue output tag), STOP below (red output tag) — the toggle reads as a unit.
+    /// A START/STOP mode as one fixed-width two-row cell sharing the glass chrome:
+    /// START on top (steel output), STOP below (red output) — reads as one toggle.
     private func pairCell(_ p: ModePair, fontSize: CGFloat, width: CGFloat) -> some View {
-        VStack(spacing: 3) {
-            pairRow(say: p.start.say, out: p.start.out, outColor: Self.glassBlue, fontSize: fontSize)
-            pairRow(say: p.stop.say, out: p.stop.out, outColor: Self.glassRed, fontSize: fontSize)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .frame(width: width)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.15), lineWidth: 0.5))
+        glassChrome(
+            VStack(spacing: 1) {
+                slantBicolor(say: p.start.say.uppercased(), out: p.start.out,
+                             outColor: Self.chipOut, fontSize: fontSize, sayFills: true)
+                slantBicolor(say: p.stop.say.uppercased(), out: p.stop.out,
+                             outColor: Self.chipStop, fontSize: fontSize, sayFills: true)
+            }
+            .frame(width: width)
+        )
     }
 
-    private func pairRow(say: String, out: String, outColor: Color, fontSize: CGFloat) -> some View {
-        HStack(spacing: 5) {
-            Text(say.uppercased())
+    /// The two-tone diagonally-split interior (no chrome). The phrase half and the
+    /// output half are clipped to complementary slants and overlapped so their
+    /// diagonal edges meet, forming a single slanted seam between the two colors.
+    private func slantBicolor(say: String, out: String, outColor: Color,
+                              fontSize: CGFloat, sayFills: Bool) -> some View {
+        let slant: CGFloat = 11
+        return HStack(spacing: -slant) {
+            Text(say)
                 .fontWeight(.semibold).foregroundStyle(Self.glassYellow)
-                .lineLimit(1).minimumScaleFactor(0.6)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .font(.system(size: fontSize)).lineLimit(1).minimumScaleFactor(0.6)
+                .frame(maxWidth: sayFills ? .infinity : nil, alignment: .leading)
+                .padding(.leading, 11).padding(.trailing, slant + 8).padding(.vertical, 4)
+                .background(Self.chipSay.opacity(0.62))
+                .clipShape(SlantLeft(slant: slant))
             Text(out)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(outColor.opacity(0.5), in: RoundedRectangle(cornerRadius: 4))
+                .fontWeight(.medium).foregroundStyle(.white)
+                .font(.system(size: fontSize)).lineLimit(1)
+                .padding(.trailing, 11).padding(.leading, slant + 8).padding(.vertical, 4)
+                .background(outColor.opacity(0.66))
+                .clipShape(SlantRight(slant: slant))
         }
-        .font(.system(size: fontSize))
+    }
+
+    /// Wrap any cell interior in glass: frosted material behind the translucent tints,
+    /// a light-cast top sheen, a lit edge stroke, and a drop shadow to lift it off the silk.
+    private func glassChrome<V: View>(_ content: V) -> some View {
+        content
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(alignment: .top) {
+                LinearGradient(colors: [.white.opacity(0.30), .clear],
+                               startPoint: .top, endPoint: .center)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .allowsHitTesting(false)
+            }
+            .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Self.glassEdge, lineWidth: 1))
+            .shadow(color: .black.opacity(0.38), radius: 4, x: 0, y: 2)
     }
 
     // MARK: - Compact bottom control bar
@@ -225,6 +269,36 @@ struct ModePair: Identifiable {
     let id: String
     let start: CheatItem
     let stop: CheatItem
+}
+
+/// Left side of a chip: a rectangle whose RIGHT edge slopes down-left by `slant`
+/// (top-right at full width, bottom-right pulled in). Pairs with `SlantRight`.
+struct SlantLeft: Shape {
+    var slant: CGFloat
+    func path(in r: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: r.minX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX - slant, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+            p.closeSubpath()
+        }
+    }
+}
+
+/// Right side of a chip: a rectangle whose LEFT edge slopes the same way (top-left
+/// pulled in, bottom-left at the edge). Overlapped with `SlantLeft` the seams meet.
+struct SlantRight: Shape {
+    var slant: CGFloat
+    func path(in r: CGRect) -> Path {
+        Path { p in
+            p.move(to: CGPoint(x: r.minX + slant, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            p.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
+            p.closeSubpath()
+        }
+    }
 }
 
 /// Wrapping layout for the cheat-sheet chips. Each subview keeps its natural width.
