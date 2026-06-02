@@ -6,6 +6,8 @@ struct CheatItem: Identifiable {
     let out: String        // the literal output it types (blue chip)
     let label: String
     let triggers: [String]
+    let pair: String?      // mode-pair name ("caps"/"spell") → drawn as one two-row cell
+    let role: String?      // "start" | "stop" within the pair (stop chip is red)
 }
 
 struct CheatGroup: Identifiable {
@@ -24,7 +26,8 @@ struct CheatGroup: Identifiable {
             let say = it["say"] as? String ?? triggers.first ?? label
             let out = it["out"] as? String ?? label
             guard !say.isEmpty else { return nil }
-            return CheatItem(say: say, out: out, label: label, triggers: triggers)
+            return CheatItem(say: say, out: out, label: label, triggers: triggers,
+                             pair: it["pair"] as? String, role: it["role"] as? String)
         }
         return CheatGroup(group: group, items: items)
     }

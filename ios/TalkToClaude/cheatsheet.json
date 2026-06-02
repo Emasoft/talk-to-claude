@@ -1,1 +1,864 @@
-[{"group": "keys", "items": [{"say": "enter", "out": "\u23ce", "label": "send \u23ce", "triggers": ["enter", "submit", "send", "send it", "go ahead", "invio", "invia", "manda", "manda messaggio"]}, {"say": "new line", "out": "\u21e7\u23ce", "label": "newline \u21e7\u23ce", "triggers": ["new line", "newline", "line break", "shift enter", "shift-enter", "a capo", "nuova riga", "shift invio", "shift-invio", "vai a capo"]}, {"say": "tab", "out": "\u21e5", "label": "tab", "triggers": ["tab", "tabulazione"]}, {"say": "escape", "out": "esc", "label": "escape", "triggers": ["escape", "esc"]}, {"say": "backspace", "out": "\u232b", "label": "backspace", "triggers": ["backspace", "scratch that", "cancella", "cancella quello"]}]}, {"group": "paths", "items": [{"say": "slash", "out": "/", "label": "/", "triggers": ["slash", "forward slash"]}, {"say": "backslash", "out": "\\", "label": "\\", "triggers": ["backslash", "barra rovesciata", "barra inversa"]}, {"say": "tilde", "out": "~", "label": "~", "triggers": ["tilde"]}, {"say": "dot", "out": ".", "label": ".", "triggers": ["dot", "period", "punto"]}, {"say": "comma", "out": ",", "label": ",", "triggers": ["comma", "virgola"]}, {"say": "dash", "out": "-", "label": "-", "triggers": ["dash", "hyphen", "trattino", "meno"]}, {"say": "underscore", "out": "_", "label": "_", "triggers": ["underscore", "trattino basso", "sottolineato"]}, {"say": "no space", "out": "no\u2423", "label": "(glue)", "triggers": ["no space", "nospace", "senza spazio", "attaccato"]}]}, {"group": "symbols", "items": [{"say": "at sign", "out": "@", "label": "@", "triggers": ["at sign", "chiocciola"]}, {"say": "hash", "out": "#", "label": "#", "triggers": ["hash", "pound", "number sign", "cancelletto", "diesis"]}, {"say": "dollar", "out": "$", "label": "$", "triggers": ["dollar", "dollar sign", "dollaro"]}, {"say": "percent", "out": "%", "label": "%", "triggers": ["percent", "percento", "per cento"]}, {"say": "caret", "out": "^", "label": "^", "triggers": ["caret", "circumflex", "accento circonflesso"]}, {"say": "ampersand", "out": "&", "label": "&", "triggers": ["ampersand", "and sign", "e commerciale"]}, {"say": "star", "out": "*", "label": "*", "triggers": ["star", "asterisk", "asterisco"]}, {"say": "pipe", "out": "|", "label": "|", "triggers": ["pipe", "vertical bar", "barra verticale", "barra"]}, {"say": "plus", "out": "+", "label": "+", "triggers": ["plus", "pi\u00f9", "piu"]}, {"say": "equals", "out": "=", "label": "=", "triggers": ["equals", "equal sign", "uguale"]}, {"say": "colon", "out": ":", "label": ":", "triggers": ["colon", "due punti"]}, {"say": "semicolon", "out": ";", "label": ";", "triggers": ["semicolon", "punto e virgola"]}, {"say": "question mark", "out": "?", "label": "?", "triggers": ["question mark", "punto interrogativo", "punto di domanda"]}, {"say": "bang", "out": "!", "label": "!", "triggers": ["bang", "exclamation", "exclamation mark", "punto esclamativo"]}, {"say": "less than", "out": "<", "label": "<", "triggers": ["less than", "left angle", "minore"]}, {"say": "greater than", "out": ">", "label": ">", "triggers": ["greater than", "right angle", "maggiore"]}]}, {"group": "quotes", "items": [{"say": "backtick", "out": "`", "label": "`", "triggers": ["backtick", "grave", "accento grave", "apice inverso"]}, {"say": "double quote", "out": "\"", "label": "\"", "triggers": ["double quote", "quote", "virgolette", "virgolette doppie"]}, {"say": "single quote", "out": "'", "label": "'", "triggers": ["single quote", "apostrophe", "apostrofo", "apice"]}, {"say": "code block", "out": "```", "label": "```", "triggers": ["code block", "triple backtick", "triple backticks", "three backticks", "three backtick", "fence", "blocco di codice", "blocco codice", "tre backtick", "tre apici"]}, {"say": "end code block", "out": "```", "label": "``` (close)", "triggers": ["end code block", "close code block", "chiudi blocco", "fine blocco"]}]}, {"group": "brackets", "items": [{"say": "open paren", "out": "(", "label": "(", "triggers": ["open paren", "open parenthesis", "left paren", "parentesi aperta", "aperta parentesi", "parentesi tonda aperta"]}, {"say": "close paren", "out": ")", "label": ")", "triggers": ["close paren", "right paren", "close parenthesis", "parentesi chiusa", "chiusa parentesi", "parentesi tonda chiusa"]}, {"say": "open bracket", "out": "[", "label": "[", "triggers": ["open bracket", "left bracket", "open square", "parentesi quadra aperta", "quadra aperta"]}, {"say": "close bracket", "out": "]", "label": "]", "triggers": ["close bracket", "right bracket", "close square", "parentesi quadra chiusa", "quadra chiusa"]}, {"say": "open brace", "out": "{", "label": "{", "triggers": ["open brace", "left brace", "open curly", "parentesi graffa aperta", "graffa aperta"]}, {"say": "close brace", "out": "}", "label": "}", "triggers": ["close brace", "right brace", "close curly", "parentesi graffa chiusa", "graffa chiusa"]}]}, {"group": "wrap", "items": [{"say": "in parens", "out": "(\u2026)", "label": "(\u2026)", "triggers": ["in parens", "in parentheses", "tra parentesi", "fra parentesi"]}, {"say": "in brackets", "out": "[\u2026]", "label": "[\u2026]", "triggers": ["in brackets", "in square brackets", "tra parentesi quadre"]}, {"say": "in braces", "out": "{\u2026}", "label": "{\u2026}", "triggers": ["in braces", "in curlies", "tra parentesi graffe"]}, {"say": "in quotes", "out": "\"\u2026\"", "label": "\"\u2026\"", "triggers": ["in quotes", "tra virgolette"]}, {"say": "in backticks", "out": "`\u2026`", "label": "`\u2026`", "triggers": ["in backticks", "tra backtick"]}]}, {"group": "case", "items": [{"say": "all caps", "out": "ABC", "label": "ALL CAPS", "triggers": ["all caps", "caps on", "caps lock", "caps mode", "uppercase", "uppercase mode", "maiuscolo", "tutto maiuscolo", "maiuscole", "modo maiuscolo"]}, {"say": "lowercase", "out": "abc", "label": "lower", "triggers": ["lowercase", "lowercase mode", "minuscolo", "minuscole", "modo minuscolo"]}, {"say": "caps off", "out": "\u2014", "label": "caps off", "triggers": ["caps off", "caps mode stop", "caps mode off", "stop caps", "end caps", "normal case", "normale"]}, {"say": "capital", "out": "Aa", "label": "Capitalize next", "triggers": ["capital", "capitalize", "maiuscola"]}]}, {"group": "markdown", "items": [{"say": "heading", "out": "#", "label": "# heading", "triggers": ["heading", "title", "header", "titolo"]}, {"say": "heading two", "out": "##", "label": "## heading", "triggers": ["heading two", "subheading", "sub heading", "sottotitolo"]}, {"say": "heading three", "out": "###", "label": "### heading", "triggers": ["heading three", "sub subheading"]}, {"say": "bullet", "out": "-", "label": "- bullet", "triggers": ["bullet", "bullet point", "list item", "punto elenco", "elenco puntato"]}, {"say": "numbered item", "out": "1.", "label": "1. numbered", "triggers": ["numbered item", "numbered list", "elenco numerato"]}, {"say": "quote block", "out": ">", "label": "> quote", "triggers": ["quote block", "block quote", "blockquote", "citazione"]}, {"say": "bold", "out": "**\u2026**", "label": "**bold**", "triggers": ["bold", "grassetto"]}, {"say": "italic", "out": "*\u2026*", "label": "*italic*", "triggers": ["italic", "corsivo"]}, {"say": "strikethrough", "out": "~~\u2026~~", "label": "~~strike~~", "triggers": ["strikethrough", "barrato"]}, {"say": "horizontal rule", "out": "---", "label": "---", "triggers": ["horizontal rule", "divider", "linea orizzontale"]}]}, {"group": "escape", "items": [{"say": "literal", "out": "as-is", "label": "literal next", "triggers": ["literal", "literally", "letterale", "letteralmente"]}]}, {"group": "spelling", "items": [{"say": "spell", "out": "a\u00b7b\u00b7c", "label": "spell ON", "triggers": ["spell", "spelling", "spell mode", "spelling mode", "spell it", "spell out", "letter by letter", "compita", "compitazione", "modo lettere", "lettera per lettera"]}, {"say": "end spell", "out": "\u2192 words", "label": "spell OFF", "triggers": ["end spell", "end spelling", "stop spelling", "stop spell", "spell mode stop", "spell mode off", "end letters", "normal mode", "fine compitazione", "fine lettere", "modo normale", "basta lettere"]}]}]
+[
+  {
+    "group": "keys",
+    "items": [
+      {
+        "say": "enter",
+        "out": "⏎",
+        "label": "send ⏎",
+        "triggers": [
+          "enter",
+          "submit",
+          "send",
+          "send it",
+          "go ahead",
+          "invio",
+          "invia",
+          "manda",
+          "manda messaggio"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "new line",
+        "out": "⇧⏎",
+        "label": "newline ⇧⏎",
+        "triggers": [
+          "new line",
+          "newline",
+          "line break",
+          "shift enter",
+          "shift-enter",
+          "a capo",
+          "nuova riga",
+          "shift invio",
+          "shift-invio",
+          "vai a capo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "tab",
+        "out": "⇥",
+        "label": "tab",
+        "triggers": [
+          "tab",
+          "tabulazione"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "escape",
+        "out": "esc",
+        "label": "escape",
+        "triggers": [
+          "escape",
+          "esc"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "backspace",
+        "out": "⌫",
+        "label": "backspace",
+        "triggers": [
+          "backspace",
+          "scratch that",
+          "cancella",
+          "cancella quello"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "paths",
+    "items": [
+      {
+        "say": "slash",
+        "out": "/",
+        "label": "/",
+        "triggers": [
+          "slash",
+          "forward slash"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "backslash",
+        "out": "\\",
+        "label": "\\",
+        "triggers": [
+          "backslash",
+          "barra rovesciata",
+          "barra inversa"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "tilde",
+        "out": "~",
+        "label": "~",
+        "triggers": [
+          "tilde"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "dot",
+        "out": ".",
+        "label": ".",
+        "triggers": [
+          "dot",
+          "period",
+          "punto"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "comma",
+        "out": ",",
+        "label": ",",
+        "triggers": [
+          "comma",
+          "virgola"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "dash",
+        "out": "-",
+        "label": "-",
+        "triggers": [
+          "dash",
+          "hyphen",
+          "trattino",
+          "meno"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "underscore",
+        "out": "_",
+        "label": "_",
+        "triggers": [
+          "underscore",
+          "trattino basso",
+          "sottolineato"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "no space",
+        "out": "no␣",
+        "label": "(glue)",
+        "triggers": [
+          "no space",
+          "nospace",
+          "senza spazio",
+          "attaccato"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "symbols",
+    "items": [
+      {
+        "say": "at sign",
+        "out": "@",
+        "label": "@",
+        "triggers": [
+          "at sign",
+          "chiocciola"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "hash",
+        "out": "#",
+        "label": "#",
+        "triggers": [
+          "hash",
+          "pound",
+          "number sign",
+          "cancelletto",
+          "diesis"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "dollar",
+        "out": "$",
+        "label": "$",
+        "triggers": [
+          "dollar",
+          "dollar sign",
+          "dollaro"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "percent",
+        "out": "%",
+        "label": "%",
+        "triggers": [
+          "percent",
+          "percento",
+          "per cento"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "caret",
+        "out": "^",
+        "label": "^",
+        "triggers": [
+          "caret",
+          "circumflex",
+          "accento circonflesso"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "ampersand",
+        "out": "&",
+        "label": "&",
+        "triggers": [
+          "ampersand",
+          "and sign",
+          "e commerciale"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "star",
+        "out": "*",
+        "label": "*",
+        "triggers": [
+          "star",
+          "asterisk",
+          "asterisco"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "pipe",
+        "out": "|",
+        "label": "|",
+        "triggers": [
+          "pipe",
+          "vertical bar",
+          "barra verticale",
+          "barra"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "plus",
+        "out": "+",
+        "label": "+",
+        "triggers": [
+          "plus",
+          "più",
+          "piu"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "equals",
+        "out": "=",
+        "label": "=",
+        "triggers": [
+          "equals",
+          "equal sign",
+          "uguale"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "colon",
+        "out": ":",
+        "label": ":",
+        "triggers": [
+          "colon",
+          "due punti"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "semicolon",
+        "out": ";",
+        "label": ";",
+        "triggers": [
+          "semicolon",
+          "punto e virgola"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "question mark",
+        "out": "?",
+        "label": "?",
+        "triggers": [
+          "question mark",
+          "punto interrogativo",
+          "punto di domanda"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "bang",
+        "out": "!",
+        "label": "!",
+        "triggers": [
+          "bang",
+          "exclamation",
+          "exclamation mark",
+          "punto esclamativo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "less than",
+        "out": "<",
+        "label": "<",
+        "triggers": [
+          "less than",
+          "left angle",
+          "minore"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "greater than",
+        "out": ">",
+        "label": ">",
+        "triggers": [
+          "greater than",
+          "right angle",
+          "maggiore"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "quotes",
+    "items": [
+      {
+        "say": "backtick",
+        "out": "`",
+        "label": "`",
+        "triggers": [
+          "backtick",
+          "grave",
+          "accento grave",
+          "apice inverso"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "double quote",
+        "out": "\"",
+        "label": "\"",
+        "triggers": [
+          "double quote",
+          "quote",
+          "virgolette",
+          "virgolette doppie"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "single quote",
+        "out": "'",
+        "label": "'",
+        "triggers": [
+          "single quote",
+          "apostrophe",
+          "apostrofo",
+          "apice"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "code block",
+        "out": "```",
+        "label": "```",
+        "triggers": [
+          "code block",
+          "triple backtick",
+          "triple backticks",
+          "three backticks",
+          "three backtick",
+          "fence",
+          "blocco di codice",
+          "blocco codice",
+          "tre backtick",
+          "tre apici"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "end code block",
+        "out": "```",
+        "label": "``` (close)",
+        "triggers": [
+          "end code block",
+          "close code block",
+          "chiudi blocco",
+          "fine blocco"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "brackets",
+    "items": [
+      {
+        "say": "open paren",
+        "out": "(",
+        "label": "(",
+        "triggers": [
+          "open paren",
+          "open parenthesis",
+          "left paren",
+          "parentesi aperta",
+          "aperta parentesi",
+          "parentesi tonda aperta"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "close paren",
+        "out": ")",
+        "label": ")",
+        "triggers": [
+          "close paren",
+          "right paren",
+          "close parenthesis",
+          "parentesi chiusa",
+          "chiusa parentesi",
+          "parentesi tonda chiusa"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "open bracket",
+        "out": "[",
+        "label": "[",
+        "triggers": [
+          "open bracket",
+          "left bracket",
+          "open square",
+          "parentesi quadra aperta",
+          "quadra aperta"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "close bracket",
+        "out": "]",
+        "label": "]",
+        "triggers": [
+          "close bracket",
+          "right bracket",
+          "close square",
+          "parentesi quadra chiusa",
+          "quadra chiusa"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "open brace",
+        "out": "{",
+        "label": "{",
+        "triggers": [
+          "open brace",
+          "left brace",
+          "open curly",
+          "parentesi graffa aperta",
+          "graffa aperta"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "close brace",
+        "out": "}",
+        "label": "}",
+        "triggers": [
+          "close brace",
+          "right brace",
+          "close curly",
+          "parentesi graffa chiusa",
+          "graffa chiusa"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "wrap",
+    "items": [
+      {
+        "say": "in parens",
+        "out": "(…)",
+        "label": "(…)",
+        "triggers": [
+          "in parens",
+          "in parentheses",
+          "tra parentesi",
+          "fra parentesi"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "in brackets",
+        "out": "[…]",
+        "label": "[…]",
+        "triggers": [
+          "in brackets",
+          "in square brackets",
+          "tra parentesi quadre"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "in braces",
+        "out": "{…}",
+        "label": "{…}",
+        "triggers": [
+          "in braces",
+          "in curlies",
+          "tra parentesi graffe"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "in quotes",
+        "out": "\"…\"",
+        "label": "\"…\"",
+        "triggers": [
+          "in quotes",
+          "tra virgolette"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "in backticks",
+        "out": "`…`",
+        "label": "`…`",
+        "triggers": [
+          "in backticks",
+          "tra backtick"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "case",
+    "items": [
+      {
+        "say": "start caps mode",
+        "out": "ABC",
+        "label": "START CAPS MODE",
+        "triggers": [
+          "start caps mode",
+          "caps mode",
+          "all caps",
+          "caps on",
+          "caps lock",
+          "uppercase",
+          "uppercase mode",
+          "maiuscolo",
+          "tutto maiuscolo",
+          "maiuscole",
+          "modo maiuscolo"
+        ],
+        "pair": "caps",
+        "role": "start"
+      },
+      {
+        "say": "stop caps mode",
+        "out": "abc",
+        "label": "STOP CAPS MODE",
+        "triggers": [
+          "stop caps mode",
+          "caps mode stop",
+          "stop caps",
+          "end caps",
+          "normal case",
+          "normale"
+        ],
+        "pair": "caps",
+        "role": "stop"
+      },
+      {
+        "say": "lowercase",
+        "out": "abc",
+        "label": "lowercase",
+        "triggers": [
+          "lowercase",
+          "lowercase mode",
+          "minuscolo",
+          "minuscole",
+          "modo minuscolo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "capital",
+        "out": "Aa",
+        "label": "Capitalize next",
+        "triggers": [
+          "capital",
+          "capitalize",
+          "maiuscola"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "markdown",
+    "items": [
+      {
+        "say": "heading",
+        "out": "#",
+        "label": "# heading",
+        "triggers": [
+          "heading",
+          "title",
+          "header",
+          "titolo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "heading two",
+        "out": "##",
+        "label": "## heading",
+        "triggers": [
+          "heading two",
+          "subheading",
+          "sub heading",
+          "sottotitolo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "heading three",
+        "out": "###",
+        "label": "### heading",
+        "triggers": [
+          "heading three",
+          "sub subheading"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "bullet",
+        "out": "-",
+        "label": "- bullet",
+        "triggers": [
+          "bullet",
+          "bullet point",
+          "list item",
+          "punto elenco",
+          "elenco puntato"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "numbered item",
+        "out": "1.",
+        "label": "1. numbered",
+        "triggers": [
+          "numbered item",
+          "numbered list",
+          "elenco numerato"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "quote block",
+        "out": ">",
+        "label": "> quote",
+        "triggers": [
+          "quote block",
+          "block quote",
+          "blockquote",
+          "citazione"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "bold",
+        "out": "**…**",
+        "label": "**bold**",
+        "triggers": [
+          "bold",
+          "grassetto"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "italic",
+        "out": "*…*",
+        "label": "*italic*",
+        "triggers": [
+          "italic",
+          "corsivo"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "strikethrough",
+        "out": "~~…~~",
+        "label": "~~strike~~",
+        "triggers": [
+          "strikethrough",
+          "barrato"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "horizontal rule",
+        "out": "---",
+        "label": "---",
+        "triggers": [
+          "horizontal rule",
+          "divider",
+          "linea orizzontale"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "escape",
+    "items": [
+      {
+        "say": "literal",
+        "out": "as-is",
+        "label": "literal next",
+        "triggers": [
+          "literal",
+          "literally",
+          "letterale",
+          "letteralmente"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
+  },
+  {
+    "group": "spelling",
+    "items": [
+      {
+        "say": "start spell mode",
+        "out": "a·b·c",
+        "label": "START SPELL MODE",
+        "triggers": [
+          "start spell mode",
+          "spell mode",
+          "spell",
+          "spelling",
+          "spelling mode",
+          "spell it",
+          "spell out",
+          "letter by letter",
+          "compita",
+          "compitazione",
+          "modo lettere",
+          "lettera per lettera"
+        ],
+        "pair": "spell",
+        "role": "start"
+      },
+      {
+        "say": "stop spell mode",
+        "out": "→ words",
+        "label": "STOP SPELL MODE",
+        "triggers": [
+          "stop spell mode",
+          "spell mode stop",
+          "end spell",
+          "end spelling",
+          "stop spelling",
+          "stop spell",
+          "end letters",
+          "normal mode",
+          "fine compitazione",
+          "fine lettere",
+          "modo normale",
+          "basta lettere"
+        ],
+        "pair": "spell",
+        "role": "stop"
+      }
+    ]
+  }
+]

@@ -134,16 +134,20 @@ RULES: list[dict] = [
      "triggers": ["in backticks", "tra backtick"]},
 
     # ── case / naming ────────────────────────────────────────────────────────
-    {"group": "case", "label": "ALL CAPS", "kind": "case", "mode": "upper",
-     "triggers": ["all caps", "caps on", "caps lock", "caps mode", "uppercase",
-                  "uppercase mode", "maiuscolo", "tutto maiuscolo", "maiuscole",
-                  "modo maiuscolo"]},
-    {"group": "case", "label": "lower", "kind": "case", "mode": "lower",
+    # CAPS is a START/STOP pair (rendered as one two-row cell in the app). We avoid
+    # the word "off" entirely — ASR hears "caps off" as "caps of".
+    {"group": "case", "label": "START CAPS MODE", "kind": "case", "mode": "upper",
+     "pair": "caps", "role": "start",
+     "triggers": ["start caps mode", "caps mode", "all caps", "caps on", "caps lock",
+                  "uppercase", "uppercase mode", "maiuscolo", "tutto maiuscolo",
+                  "maiuscole", "modo maiuscolo"]},
+    {"group": "case", "label": "STOP CAPS MODE", "kind": "case", "mode": "none",
+     "pair": "caps", "role": "stop",
+     "triggers": ["stop caps mode", "caps mode stop", "stop caps",
+                  "end caps", "normal case", "normale"]},
+    {"group": "case", "label": "lowercase", "kind": "case", "mode": "lower",
      "triggers": ["lowercase", "lowercase mode", "minuscolo", "minuscole",
                   "modo minuscolo"]},
-    {"group": "case", "label": "caps off", "kind": "case", "mode": "none",
-     "triggers": ["caps off", "caps mode stop", "caps mode off", "stop caps",
-                  "end caps", "normal case", "normale"]},
     {"group": "case", "label": "Capitalize next", "kind": "case_once", "mode": "cap",
      "triggers": ["capital", "capitalize", "maiuscola"]},
 
@@ -173,14 +177,16 @@ RULES: list[dict] = [
     {"group": "escape", "label": "literal next", "kind": "literal",
      "triggers": ["literal", "literally", "letterale", "letteralmente"]},
 
-    # ── spelling mode ────────────────────────────────────────────────────────
-    {"group": "spelling", "label": "spell ON", "kind": "spell_on",
-     "triggers": ["spell", "spelling", "spell mode", "spelling mode", "spell it",
-                  "spell out", "letter by letter", "compita", "compitazione",
+    # ── spelling mode (START/STOP pair) ──────────────────────────────────────
+    {"group": "spelling", "label": "START SPELL MODE", "kind": "spell_on",
+     "pair": "spell", "role": "start",
+     "triggers": ["start spell mode", "spell mode", "spell", "spelling", "spelling mode",
+                  "spell it", "spell out", "letter by letter", "compita", "compitazione",
                   "modo lettere", "lettera per lettera"]},
-    {"group": "spelling", "label": "spell OFF", "kind": "spell_off",
-     "triggers": ["end spell", "end spelling", "stop spelling", "stop spell",
-                  "spell mode stop", "spell mode off", "end letters", "normal mode",
+    {"group": "spelling", "label": "STOP SPELL MODE", "kind": "spell_off",
+     "pair": "spell", "role": "stop",
+     "triggers": ["stop spell mode", "spell mode stop", "end spell", "end spelling",
+                  "stop spelling", "stop spell", "end letters", "normal mode",
                   "fine compitazione", "fine lettere", "modo normale", "basta lettere"]},
 ]
 
@@ -403,9 +409,10 @@ def _rule_out(r: dict) -> str:
     if kind == "wrap":
         return f'{r["open"]}…{r["close"]}'
     if kind == "key":
-        return _KEY_GLYPH.get(r["key"], r["key"])
+        return str(_KEY_GLYPH.get(r["key"], r["key"]))
     if kind == "case":
-        return {"upper": "ABC", "lower": "abc", "none": "—"}.get(r["mode"], "")
+        # "none" is CAPS STOP — show abc (back to normal text), not a dash.
+        return {"upper": "ABC", "lower": "abc", "none": "abc"}.get(r["mode"], "")
     if kind == "case_once":
         return "Aa"
     if kind == "literal":
@@ -429,6 +436,9 @@ def cheatsheet() -> list[dict]:
                 "out": _rule_out(r),
                 "label": r["label"],
                 "triggers": r["triggers"],
+                # START/STOP pairing so the app draws them as one two-row cell.
+                "pair": r.get("pair"),
+                "role": r.get("role"),
             }
         )
     return [{"group": g, "items": items} for g, items in groups.items()]
