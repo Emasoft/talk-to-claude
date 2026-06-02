@@ -12,6 +12,9 @@ final class VoiceStream: ObservableObject {
     @Published var status = "Tap the mic to start"
     @Published var finals: [String] = []
     @Published var lastError = ""
+    @Published var cheatGroups: [CheatGroup] = []
+    @Published var spellMode = false
+    @Published var capsMode = "none"  // "none" | "upper" | "lower"
 
     private let settings: AppSettings
     private let urlSession = URLSession(configuration: .default)
@@ -58,6 +61,8 @@ final class VoiceStream: ObservableObject {
         speaking = false
         connected = false
         status = "Stopped"
+        spellMode = false
+        capsMode = "none"
         liveTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -110,6 +115,13 @@ final class VoiceStream: ObservableObject {
             }
         case "error":
             lastError = (obj["error"] as? String) ?? "server error"
+        case "cheatsheet":
+            if let groups = obj["groups"] as? [[String: Any]] {
+                cheatGroups = groups.compactMap(CheatGroup.from(json:))
+            }
+        case "mode":
+            spellMode = (obj["spell"] as? Bool) ?? false
+            capsMode = (obj["caps"] as? String) ?? "none"
         default:
             break
         }

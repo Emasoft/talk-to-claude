@@ -7,6 +7,7 @@ struct ContentView: View {
     @StateObject private var claude: ClaudeClient
     @State private var audio = AudioStreamer()
     @State private var showSettings = false
+    @State private var showCheatSheet = false
 
     private let paneTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
@@ -30,12 +31,18 @@ struct ContentView: View {
             .padding()
             .navigationTitle("Talk to Claude")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showCheatSheet = true } label: { Image(systemName: "list.bullet.rectangle") }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                 }
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(settings: settings, claude: claude)
+            }
+            .sheet(isPresented: $showCheatSheet) {
+                CheatSheetView(groups: voice.cheatGroups)
             }
         }
         .onAppear {
@@ -68,18 +75,30 @@ struct ContentView: View {
     // MARK: - Subviews
 
     private var statusBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Circle()
                 .fill(voice.connected ? .green : .gray)
                 .frame(width: 10, height: 10)
-            Text(voice.connected ? "Connected to \(settings.macIP)" : "Not connected")
+            Text(voice.connected ? "Connected" : "Not connected")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
+            if voice.capsMode == "lower" { modeBadge("abc", .blue) }
+            if voice.spellMode { modeBadge("SPELL", .purple) }
             Spacer()
             Text("▸ \(settings.session)")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func modeBadge(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.2), in: Capsule())
+            .foregroundStyle(color)
     }
 
     private var micControls: some View {
