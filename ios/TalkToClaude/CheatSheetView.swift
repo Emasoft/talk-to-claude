@@ -2,6 +2,8 @@ import SwiftUI
 
 struct CheatItem: Identifiable {
     let id = UUID()
+    let say: String        // the spoken phrase (yellow chip)
+    let out: String        // the literal output it types (blue chip)
     let label: String
     let triggers: [String]
 }
@@ -11,14 +13,18 @@ struct CheatGroup: Identifiable {
     let group: String
     let items: [CheatItem]
 
-    /// Parse one group from the server's `{type:"cheatsheet"}` payload.
+    /// Parse one group from the server's `{type:"cheatsheet"}` payload. Tolerant of
+    /// older payloads that lack `say`/`out` (falls back to triggers/label).
     static func from(json: [String: Any]) -> CheatGroup? {
         guard let group = json["group"] as? String,
               let rawItems = json["items"] as? [[String: Any]] else { return nil }
         let items = rawItems.compactMap { it -> CheatItem? in
-            guard let label = it["label"] as? String,
-                  let triggers = it["triggers"] as? [String] else { return nil }
-            return CheatItem(label: label, triggers: triggers)
+            let triggers = it["triggers"] as? [String] ?? []
+            let label = it["label"] as? String ?? ""
+            let say = it["say"] as? String ?? triggers.first ?? label
+            let out = it["out"] as? String ?? label
+            guard !say.isEmpty else { return nil }
+            return CheatItem(say: say, out: out, label: label, triggers: triggers)
         }
         return CheatGroup(group: group, items: items)
     }

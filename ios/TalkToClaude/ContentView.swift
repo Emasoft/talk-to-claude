@@ -59,27 +59,30 @@ struct ContentView: View {
         GeometryReader { geo in
             let cols = columnCount(for: geo.size.width)
             let big = geo.size.width >= 980
-            let grid = Array(repeating: GridItem(.flexible(), spacing: 4), count: cols)
+            let items = voice.cheatGroups.flatMap { $0.items }
+            let rows = max(1, (items.count + cols - 1) / cols)
+            let spacing: CGFloat = big ? 5 : 3
+            let pad: CGFloat = 8
+            // Size each row to fill the available height. Cap it so the iPad's tall
+            // screen doesn't blow rows up to absurd heights (it centers instead).
+            let avail = geo.size.height - pad * 2 - spacing * CGFloat(rows - 1)
+            let rowH = min(big ? 48 : 40, max(16, avail / CGFloat(rows)))
+            let fontSize = max(8, min(big ? 16 : 13, rowH * 0.42))
+            let grid = Array(repeating: GridItem(.flexible(), spacing: spacing), count: cols)
             ScrollView {
-                if voice.cheatGroups.isEmpty {
+                if items.isEmpty {
                     Text("Tap the mic once to load the command list.")
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(.top, 24)
                 } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(voice.cheatGroups) { group in
-                            Text(group.group.uppercased())
-                                .font(.system(size: 9, weight: .heavy))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 1)
-                            LazyVGrid(columns: grid, spacing: 4) {
-                                ForEach(group.items) { item in cheatCell(item, big: big) }
-                            }
-                        }
+                    LazyVGrid(columns: grid, spacing: spacing) {
+                        ForEach(items) { item in cheatCell(item, fontSize: fontSize, height: rowH) }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 6)
-                    .padding(.bottom, 10)
+                    .padding(pad)
+                    // Center the whole grid in the viewport: on iPhone the rows are
+                    // sized to fill it exactly; on iPad they're capped, so the block
+                    // floats centered with balanced margins top and bottom.
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .center)
                 }
             }
         }
@@ -92,19 +95,27 @@ struct ContentView: View {
         return 3
     }
 
-    private func cheatCell(_ item: CheatItem, big: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(item.triggers.first ?? item.label)
-                .font(.system(size: big ? 13 : 11, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.6)
-            Text(item.label)
-                .font(.system(size: big ? 12 : 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1).minimumScaleFactor(0.6)
+    /// One-line two-tone chip: spoken phrase (bold yellow on black) | output (white on blue).
+    /// Rows are sized by the caller so the whole grid fills the screen.
+    private func cheatCell(_ item: CheatItem, fontSize: CGFloat, height: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Text(item.say)
+                .fontWeight(.bold)
+                .foregroundStyle(.yellow)
+                .lineLimit(1).minimumScaleFactor(0.5)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 5)
+                .background(Color.black)
+            Text(item.out)
+                .foregroundStyle(.white)
+                .lineLimit(1).minimumScaleFactor(0.5)
+                .frame(maxHeight: .infinity)
+                .padding(.horizontal, 5)
+                .background(Color.blue)
         }
-        .frame(maxWidth: .infinity, minHeight: big ? 38 : 30, alignment: .leading)
-        .padding(.horizontal, big ? 8 : 5).padding(.vertical, big ? 5 : 3)
-        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+        .font(.system(size: fontSize))
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     // MARK: - Compact bottom control bar
