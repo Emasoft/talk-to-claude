@@ -362,6 +362,7 @@ async def handle_stream(request):
     context = str(cfg.get("context") or DEFAULT_CONTEXT)
     sample_rate = int(cfg.get("sample_rate") or SAMPLE_RATE)
     seg = UtteranceSegmenter(sample_rate=sample_rate)
+    modes: dict = {}  # persistent caps/spell state for this connection
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate}", file=sys.stderr)
@@ -384,12 +385,19 @@ async def handle_stream(request):
                         await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
                         continue
                     if text:
-                        actions = interpret(text)
+                        prev_modes = dict(modes)
+                        actions = interpret(text, modes)
                         ok, err = execute_actions(session, actions)
                         await ws.send_json(
                             {"type": "final", "text": text, "rendered": render(actions), "injected": ok}
                             | ({} if ok else {"error": err})
                         )
+                        if modes != prev_modes:
+                            await ws.send_json({
+                                "type": "mode",
+                                "spell": bool(modes.get("spelling")),
+                                "caps": modes.get("case_mode", "none"),
+                            })
                         print(f"[stream] -> {session}: {text!r} => {render(actions)!r}", file=sys.stderr)
                     else:
                         await ws.send_json({"type": "final", "text": ""})

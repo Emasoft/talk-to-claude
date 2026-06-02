@@ -66,6 +66,17 @@ def main() -> int:
             print(f"│   got     : {got!r}")
     print(f"└{'─' * name_w}┴────────┘")
     total = len(CASES)
+    # Persistent modes: caps/spell carry across utterances when a shared dict is passed.
+    m: dict = {}
+    persist = (
+        render(interpret("caps mode a", m)) == "A"
+        and render(interpret("b c", m)) == "B C"   # caps persisted into a new utterance
+        and render(interpret("caps mode stop d", m)) == "d"
+    )
+    print(f"persistent modes across utterances: {'PASS' if persist else 'FAIL'}")
+    if not persist:
+        failed += 1
+
     print(f"{total - failed}/{total} passed." + (" All green." if failed == 0 else f" {failed} FAILED."))
     return 1 if failed else 0
 

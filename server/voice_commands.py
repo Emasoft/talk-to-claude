@@ -247,13 +247,18 @@ for _r in RULES:
 _MAXW = max(len(p.split()) for p in _PHRASES)
 
 
-def interpret(transcript: str) -> list[tuple[str, str]]:
+def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str]]:
+    # `modes` carries persistent state (spelling + case) ACROSS utterances. Pass a
+    # dict (mutated in place) to keep "caps mode"/"spell mode" on between sentences;
+    # pass nothing for a one-shot interpret (the default — tests use this).
+    if modes is None:
+        modes = {}
     tokens = transcript.split()
     n = len(tokens)
     actions: list[tuple[str, str]] = []
     buf: list[tuple[str, bool]] = []  # (text, glue_before)
     next_glue = False
-    case_mode = "none"
+    case_mode = modes.get("case_mode", "none")  # persists across utterances
     cap_once = False
     literal_once = False
     pending_close: str | None = None
@@ -292,7 +297,7 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
             next_glue = False  # a wrapped group is complete — space before the next word
             pending_close = None
 
-    spelling = False
+    spelling = modes.get("spelling", False)  # persists across utterances
 
     def emit_letter(ch: str):
         nonlocal next_glue, cap_once
@@ -370,6 +375,8 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
             pending_close = matched["close"]
 
     flush()
+    modes["spelling"] = spelling
+    modes["case_mode"] = case_mode
     return actions
 
 
