@@ -144,6 +144,28 @@ RULES: list[dict] = [
     {"group": "case", "label": "Capitalize next", "kind": "case_once", "mode": "cap",
      "triggers": ["capital", "capitalize", "maiuscola"]},
 
+    # ── markdown ─────────────────────────────────────────────────────────────
+    {"group": "markdown", "label": "# heading", "kind": "prefix", "text": "# ",
+     "triggers": ["heading", "title", "header", "titolo"]},
+    {"group": "markdown", "label": "## heading", "kind": "prefix", "text": "## ",
+     "triggers": ["heading two", "subheading", "sub heading", "sottotitolo"]},
+    {"group": "markdown", "label": "### heading", "kind": "prefix", "text": "### ",
+     "triggers": ["heading three", "sub subheading"]},
+    {"group": "markdown", "label": "- bullet", "kind": "prefix", "text": "- ",
+     "triggers": ["bullet", "bullet point", "list item", "punto elenco", "elenco puntato"]},
+    {"group": "markdown", "label": "1. numbered", "kind": "prefix", "text": "1. ",
+     "triggers": ["numbered item", "numbered list", "elenco numerato"]},
+    {"group": "markdown", "label": "> quote", "kind": "prefix", "text": "> ",
+     "triggers": ["quote block", "block quote", "blockquote", "citazione"]},
+    {"group": "markdown", "label": "**bold**", "kind": "wrap", "open": "**", "close": "**",
+     "triggers": ["bold", "grassetto"]},
+    {"group": "markdown", "label": "*italic*", "kind": "wrap", "open": "*", "close": "*",
+     "triggers": ["italic", "corsivo"]},
+    {"group": "markdown", "label": "~~strike~~", "kind": "wrap", "open": "~~", "close": "~~",
+     "triggers": ["strikethrough", "barrato"]},
+    {"group": "markdown", "label": "---", "kind": "char", "char": "---",
+     "triggers": ["horizontal rule", "divider", "linea orizzontale"]},
+
     # ── literal escape ───────────────────────────────────────────────────────
     {"group": "escape", "label": "literal next", "kind": "literal",
      "triggers": ["literal", "literally", "letterale", "letteralmente"]},
@@ -248,6 +270,11 @@ def interpret(transcript: str) -> list[tuple[str, str]]:
             # Don't glue the fence to the previous word ("a ```python", not
             # "a```python"), but do glue an immediately following language word.
             buf.append(("```", next_glue))
+            next_glue = True
+        elif kind == "prefix":
+            # Markdown line prefixes like "## " / "- " / "> " — already end with a
+            # space, so glue the following text directly after them.
+            buf.append((matched["text"], next_glue))
             next_glue = True
         elif kind == "key":
             flush()
