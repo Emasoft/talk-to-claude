@@ -416,7 +416,7 @@ def _rule_out(r: dict) -> str:
         return "→ words"
     if kind == "glue":
         return "no␣"
-    return r.get("label", "")
+    return str(r.get("label", ""))
 
 
 def cheatsheet() -> list[dict]:
