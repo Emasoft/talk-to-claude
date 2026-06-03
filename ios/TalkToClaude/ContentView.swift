@@ -21,10 +21,13 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             FluxBackground().ignoresSafeArea()
-            VStack(spacing: 0) {
-                cheatSheet
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                bottomBar
+            GeometryReader { geo in
+                VStack(spacing: 0) {
+                    cheatSheet
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Transcript line count scales with screen height (min 3).
+                    bottomBar(transcriptLines: max(3, min(8, Int(geo.size.height / 200))))
+                }
             }
         }
         // Fixed dark-glass appearance regardless of the device's light/dark setting.
@@ -179,7 +182,7 @@ struct ContentView: View {
 
     // MARK: - Compact bottom control bar
 
-    private var bottomBar: some View {
+    private func bottomBar(transcriptLines: Int) -> some View {
         HStack(spacing: 10) {
             Button(action: toggleMic) {
                 ZStack {
@@ -202,17 +205,7 @@ struct ContentView: View {
                     if voice.capsMode == "lower" { modeBadge("abc", .blue) }
                     if voice.spellMode { modeBadge("SPELL", .purple) }
                 }
-                // Two transcript lines: the previous utterance (dim) above the latest.
-                Text(voice.finals.count > 1 ? voice.finals[1] : " ")
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .foregroundStyle(.secondary)
-                Text(voice.finals.first ?? "—")
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .foregroundStyle(.primary)
+                transcriptView(lines: transcriptLines)
             }
             Spacer(minLength: 4)
             Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
@@ -222,6 +215,26 @@ struct ContentView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+    }
+
+    /// The last `lines` transcribed utterances — oldest at top, newest (bright) at the
+    /// bottom — padded with blanks so the row keeps a stable minimum height.
+    private func transcriptView(lines: Int) -> some View {
+        let recent = Array(voice.finals.prefix(lines))   // newest-first
+        return VStack(alignment: .leading, spacing: 1) {
+            ForEach(0..<lines, id: \.self) { r in
+                let ageFromNewest = (lines - 1) - r       // bottom row → 0 (newest)
+                let text = ageFromNewest < recent.count
+                    ? recent[ageFromNewest]
+                    : (ageFromNewest == 0 ? "—" : " ")
+                Text(text.isEmpty ? " " : text)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .foregroundStyle(ageFromNewest == 0 ? .primary : .secondary)
+                    .opacity(ageFromNewest == 0 ? 1.0 : max(0.4, 1.0 - Double(ageFromNewest) * 0.14))
+            }
+        }
     }
 
     private func modeBadge(_ text: String, _ color: Color) -> some View {
