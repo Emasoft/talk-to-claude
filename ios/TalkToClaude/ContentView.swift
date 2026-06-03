@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import AudioToolbox
 
 struct ContentView: View {
     @StateObject private var settings: AppSettings
@@ -45,14 +46,29 @@ struct ContentView: View {
         }
     }
 
-    // Glass-chip palette (the blue-satin background lives in SilkBackground).
+    // Glass-chip palette (the ffflux background lives in FluxBackground).
     static let glassYellow = Color(hue: 0.13, saturation: 0.55, brightness: 1.0)
     static let chipSay = Color(red: 0.05, green: 0.08, blue: 0.20)   // very dark navy (phrase side)
-    static let chipOut = Color(red: 0.38, green: 0.52, blue: 0.70)   // light steel (output side)
-    static let chipStop = Color(red: 0.60, green: 0.22, blue: 0.26)  // muted red (STOP output)
+    static let chipOut = Color(red: 0.38, green: 0.52, blue: 0.70)   // neutral steel (output side)
+    static let chipOpen = Color(red: 0.18, green: 0.55, blue: 0.36)  // green tone: open / start
+    static let chipClose = Color(red: 0.70, green: 0.22, blue: 0.30) // red tone: close / stop
     static let glassEdge = LinearGradient(
         colors: [.white.opacity(0.65), .white.opacity(0.12)],
         startPoint: .top, endPoint: .bottom)
+
+    /// Output-side tint by role: green for OPEN, red for CLOSE, steel for everything
+    /// else. (Keyed on the English `say` so it's language-independent.)
+    private func toneColor(for item: CheatItem) -> Color {
+        if item.say.hasPrefix("open ") { return Self.chipOpen }
+        if item.say.hasPrefix("close ") { return Self.chipClose }
+        return Self.chipOut
+    }
+
+    /// Click sound + light haptic for every on-screen button.
+    private func tapFeedback() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        AudioServicesPlaySystemSound(1104)   // soft keyboard-tap click
+    }
 
     private func toggleMic() {
         if voice.listening {
@@ -81,8 +97,8 @@ struct ContentView: View {
             let pairs = modePairs(from: all)
             // Italian phrases run longer, so shrink the iPhone font a touch to keep
             // everything (including the mode pairs) on one screen.
-            let font: CGFloat = big ? 19 : (italian ? 10.5 : 12)
-            let pairW: CGFloat = big ? 320 : (italian ? 196 : 178)
+            let font: CGFloat = big ? 19 : (italian ? 9.5 : 11)
+            let pairW: CGFloat = big ? 320 : (italian ? 188 : 170)
             ScrollView {
                 if all.isEmpty {
                     Text("Tap the mic once to load the command list.")
@@ -93,12 +109,14 @@ struct ContentView: View {
                     // rows line up vertically (left-tabbed). On the narrow iPhone the
                     // full-length names don't leave room for that, so we tight-pack
                     // (columns: 0) to keep everything on one screen.
-                    FlowLayout(spacing: big ? 6 : 4, columns: big ? 6 : 0) {
+                    // Right-aligned: the output symbols line up near the right edge so
+                    // you can scan a column of symbols, then read the phrase to its left.
+                    FlowLayout(spacing: big ? 6 : 4, columns: big ? 6 : 0, rightAligned: true) {
                         ForEach(singles) { singleCell($0, fontSize: font) }
                         ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
                     }
                     .padding(10)
-                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .trailing)
                 }
             }
         }
@@ -123,7 +141,7 @@ struct ContentView: View {
     /// diagonal slant, wrapped in glass chrome (frosted material + lit edge + shadow).
     private func singleCell(_ item: CheatItem, fontSize: CGFloat) -> some View {
         glassChrome(
-            slantBicolor(say: italian ? item.sayIt : item.say, out: item.out, outColor: Self.chipOut,
+            slantBicolor(say: italian ? item.sayIt : item.say, out: item.out, outColor: toneColor(for: item),
                          fontSize: fontSize, sayFills: false)
         )
         .fixedSize()
@@ -135,9 +153,9 @@ struct ContentView: View {
         glassChrome(
             VStack(spacing: 1) {
                 slantBicolor(say: (italian ? p.start.sayIt : p.start.say).uppercased(), out: p.start.out,
-                             outColor: Self.chipOut, fontSize: fontSize, sayFills: true)
+                             outColor: Self.chipOpen, fontSize: fontSize, sayFills: true)
                 slantBicolor(say: (italian ? p.stop.sayIt : p.stop.say).uppercased(), out: p.stop.out,
-                             outColor: Self.chipStop, fontSize: fontSize, sayFills: true)
+                             outColor: Self.chipClose, fontSize: fontSize, sayFills: true)
             }
             .frame(width: width)
         )
@@ -186,45 +204,80 @@ struct ContentView: View {
     // MARK: - Compact bottom control bar
 
     private func bottomBar(transcriptLines: Int) -> some View {
-        HStack(spacing: 10) {
-            Button(action: toggleMic) {
-                ZStack {
-                    Circle()
-                        .fill(voice.listening ? (voice.speaking ? Color.red : Color.orange) : Color.accentColor)
-                        .frame(width: 46, height: 46)
-                    Image(systemName: voice.listening ? "waveform" : "mic.fill")
-                        .font(.system(size: 19, weight: .bold))
-                        .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 5) {
+            // Row 1 — big status labels + (bold red) errors, full width so they never wrap.
+            HStack(spacing: 9) {
+                statusLabel(voice.connected ? "CONNECTED" : "OFFLINE",
+                            color: voice.connected ? .green : .gray)
+                statusLabel(voice.speaking ? "REC" : (voice.listening ? "LISTENING" : "IDLE"),
+                            color: voice.speaking ? .red : (voice.listening ? .orange : .gray))
+                if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
+                if voice.capsMode == "lower" { modeBadge("abc", .blue) }
+                if voice.spellMode { modeBadge("SPELL", .purple) }
+                Spacer(minLength: 6)
+                if !voice.lastError.isEmpty {
+                    Text(voice.lastError)
+                        .font(.subheadline.weight(.bold)).foregroundStyle(.red)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }
-            .symbolEffect(.variableColor, isActive: voice.speaking)
-
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Circle().fill(voice.connected ? .green : .gray).frame(width: 8, height: 8)
-                    Text(voice.connected ? "Connected" : (voice.listening ? voice.status : "Tap to talk"))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
-                    if voice.capsMode == "lower" { modeBadge("abc", .blue) }
-                    if voice.spellMode { modeBadge("SPELL", .purple) }
+            // Row 2 — transcript, full width.
+            transcriptView(lines: transcriptLines)
+            // Row 3 — finger-sized controls.
+            HStack(spacing: 12) {
+                Button { tapFeedback(); toggleMic() } label: {
+                    ZStack {
+                        Circle()
+                            .fill(voice.listening ? (voice.speaking ? Color.red : Color.orange) : Color.accentColor)
+                            .frame(width: 58, height: 58)
+                        Image(systemName: voice.listening ? "waveform" : "mic.fill")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
                 }
-                transcriptView(lines: transcriptLines)
+                .symbolEffect(.variableColor, isActive: voice.speaking)
+                Spacer(minLength: 6)
+                pillButton(italian ? "IT" : "EN") { italian.toggle() }
+                iconButton("magnifyingglass") { showSearch = true }
+                iconButton("gearshape") { showSettings = true }
             }
-            Spacer(minLength: 4)
-            Button { italian.toggle() } label: {
-                Text(italian ? "IT" : "EN")
-                    .font(.caption.weight(.bold)).foregroundStyle(.white)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 0.6))
-            }
-            Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
-            Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                .padding(.leading, 2)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+    }
+
+    /// Bold status pill with a coloured dot (CONNECTED / OFFLINE, REC / LISTENING / IDLE).
+    private func statusLabel(_ text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 9, height: 9)
+            Text(text).font(.subheadline.weight(.bold)).foregroundStyle(color)
+        }
+    }
+
+    /// Finger-sized glass icon button with click + haptic feedback.
+    private func iconButton(_ system: String, action: @escaping () -> Void) -> some View {
+        Button { tapFeedback(); action() } label: {
+            Image(systemName: system)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 54, height: 54)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(.white.opacity(0.25), lineWidth: 0.7))
+        }
+    }
+
+    /// Finger-sized glass text button (the EN/IT toggle).
+    private func pillButton(_ text: String, action: @escaping () -> Void) -> some View {
+        Button { tapFeedback(); action() } label: {
+            Text(text)
+                .font(.title3.weight(.heavy)).foregroundStyle(.white)
+                .frame(width: 66, height: 54)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(.white.opacity(0.35), lineWidth: 0.9))
+        }
     }
 
     /// The last `lines` transcribed utterances — oldest at top, newest (bright) at the
@@ -316,6 +369,7 @@ struct FluxBackground: View {
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
     var columns: Int = 0
+    var rightAligned: Bool = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
         let maxW = proposal.width ?? .infinity
@@ -339,13 +393,18 @@ struct FlowLayout: Layout {
 
         if columns > 0 && maxWidth.isFinite {
             // Column-snapped: a slot is 1/N of the width; chips occupy whole slots.
+            // Right-aligned, each chip sits at the RIGHT of its span so the output
+            // symbols line up down each column.
             let slotW = (maxWidth + spacing) / CGFloat(columns)
             var col = 0
             for (i, sv) in subviews.enumerated() {
                 let s = sv.sizeThatFits(.unspecified)
                 let span = min(columns, max(1, Int(ceil((s.width + spacing) / slotW))))
                 if col + span > columns { col = 0; y += rowH + spacing; rowH = 0 }
-                spots.append((i, CGFloat(col) * slotW, y, s))
+                let x = rightAligned
+                    ? CGFloat(col + span) * slotW - spacing - s.width
+                    : CGFloat(col) * slotW
+                spots.append((i, x, y, s))
                 col += span
                 rowH = max(rowH, s.height)
             }
@@ -354,14 +413,26 @@ struct FlowLayout: Layout {
 
         // Tight wrap: pack chips left-to-right, wrapping when out of room.
         var x: CGFloat = 0
+        var rowStart = 0
+        func alignRow(_ end: Int) {
+            guard rightAligned, maxWidth.isFinite, end > rowStart else { return }
+            let last = spots[end - 1]
+            let dx = maxWidth - (last.x + last.size.width)
+            if dx > 0 { for k in rowStart..<end { spots[k].x += dx } }
+        }
         for (i, sv) in subviews.enumerated() {
             let s = sv.sizeThatFits(.unspecified)
-            if x > 0 && x + s.width > maxWidth { x = 0; y += rowH + spacing; rowH = 0 }
+            if x > 0 && x + s.width > maxWidth {
+                alignRow(spots.count)
+                x = 0; y += rowH + spacing; rowH = 0
+                rowStart = spots.count
+            }
             spots.append((i, x, y, s))
             x += s.width + spacing
             rowH = max(rowH, s.height)
             widest = max(widest, x - spacing)
         }
+        alignRow(spots.count)
         return (widest, y + rowH, spots)
     }
 }
