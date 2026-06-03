@@ -185,7 +185,7 @@ def _norm_tty(tty: str) -> str:
     return t[5:] if t.startswith("/dev/") else t
 
 
-def _claude_procs_by_tty() -> dict[str, str]:
+def _claude_procs_by_tty(need_cwd: bool = True) -> dict[str, str]:
     """Map normalized tty -> working dir for every tab where `claude` is the
     FOREGROUND process. Two safety filters matter here: (1) the process must be
     named 'claude' (a bare shell prompt waiting to launch claude has none, so it's
@@ -212,6 +212,8 @@ def _claude_procs_by_tty() -> dict[str, str]:
             pid_tty.append((pid, _norm_tty(tty)))
     if not pid_tty:
         return {}
+    if not need_cwd:                            # iTerm supplies cwd via its `path` variable;
+        return {tty: "" for _, tty in pid_tty}  # skip lsof (it can hang on a busy machine).
     cwds = _lsof_cwds([p for p, _ in pid_tty])
     return {tty: cwds.get(pid, "") for pid, tty in pid_tty}
 
@@ -363,10 +365,9 @@ async def _discover_iterm_api(claude_ttys: set[str]) -> list[dict]:
                                   "label": _folder_leaf(cwd) or title or "iTerm",
                                   "cwd": cwd, "title": title, "target": target})
         return found
-    except Exception:  # noqa: BLE001 - drop a stale connection, reconnect next poll
-        _ITERM_CONN = None
-        _gui_failed("iterm")
-        return []
+    except Exception:  # noqa: BLE001 - drop the (maybe stale) connection; reconnect next
+        _ITERM_CONN = None   # poll. If the reconnect itself fails, the breaker trips there —
+        return []            # a one-off read error must NOT block injection/focus for 30s.
 
 
 async def _iterm_send(session_id: str, actions) -> tuple[bool, str]:
@@ -407,10 +408,14 @@ async def _focus_target(target: str) -> tuple[bool, str]:
                 return False, "iTerm session not found (closed?)"
             await sess.async_activate(select_tab=True, order_window_front=True)
             # The API raises the window WITHIN iTerm; `open -b` makes iTerm the active
-            # app so the monitor actually shows it (and switches Space if needed).
-            await asyncio.get_running_loop().run_in_executor(
-                None, lambda: subprocess.run(["open", "-b", "com.googlecode.iterm2"],
-                                             capture_output=True, timeout=4))
+            # app so the monitor actually shows it. Best-effort — the tab is already
+            # raised, so a hiccup here must not report the focus as failed.
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: subprocess.run(["open", "-b", "com.googlecode.iterm2"],
+                                                 capture_output=True, timeout=4))
+            except Exception:  # noqa: BLE001
+                pass
             return True, ""
         except Exception as e:  # noqa: BLE001
             _ITERM_CONN = None
@@ -468,10 +473,14 @@ async def discover_claude_sessions() -> list[dict]:
     now = time.monotonic()
     if now - _SESS_CACHE["ts"] < _SESS_TTL:
         return _SESS_CACHE["val"]
-    proc_by_tty = _claude_procs_by_tty()      # tty -> cwd (used by Terminal; keys = claude ttys)
+    # Terminal.app needs cwd from lsof (no API); iTerm uses its own `path` variable —
+    # so only pay for lsof when Terminal could actually contribute a session.
+    term_active = not _gui_skipped("terminal") and _app_running("/Terminal.app/")
+    proc_by_tty = _claude_procs_by_tty(need_cwd=term_active)   # keys = foreground-claude ttys
     sessions = _discover_tmux()
     sessions += await _discover_iterm_api(set(proc_by_tty))
-    sessions += _discover_terminal(proc_by_tty)
+    if term_active:
+        sessions += _discover_terminal(proc_by_tty)
     _SESS_CACHE["ts"] = now
     _SESS_CACHE["val"] = sessions
     return sessions
