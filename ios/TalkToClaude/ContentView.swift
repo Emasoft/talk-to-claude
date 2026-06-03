@@ -20,7 +20,7 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            Self.silkBackground.ignoresSafeArea()
+            SilkBackground().ignoresSafeArea()
             VStack(spacing: 0) {
                 cheatSheet
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -41,12 +41,7 @@ struct ContentView: View {
         }
     }
 
-    // Fixed blue-silk background + glass-chip palette (identical in light & dark).
-    static let silkDark = Color(red: 0.01, green: 0.09, blue: 0.24)   // fold valleys
-    static let silkDeep = Color(red: 0.03, green: 0.24, blue: 0.46)
-    static let silkAzure = Color(red: 0.08, green: 0.45, blue: 0.72)
-    static let silkBright = Color(red: 0.20, green: 0.64, blue: 0.88)
-    static let silkHi = Color(red: 0.60, green: 0.85, blue: 1.0)     // specular highlights
+    // Glass-chip palette (the blue-satin background lives in SilkBackground).
     static let glassYellow = Color(hue: 0.13, saturation: 0.55, brightness: 1.0)
     static let chipSay = Color(red: 0.05, green: 0.08, blue: 0.20)   // very dark navy (phrase side)
     static let chipOut = Color(red: 0.38, green: 0.52, blue: 0.70)   // light steel (output side)
@@ -54,28 +49,6 @@ struct ContentView: View {
     static let glassEdge = LinearGradient(
         colors: [.white.opacity(0.65), .white.opacity(0.12)],
         startPoint: .top, endPoint: .bottom)
-
-    /// Flowing blue satin via a mesh of blues (sheen + folds). Linear fallback < iOS 18.
-    @ViewBuilder static var silkBackground: some View {
-        if #available(iOS 18.0, *) {
-            // 4×4 mesh: bright speculars and dark valleys alternate on the diagonal so
-            // the blend reads as flowing satin folds rather than a flat gradient.
-            MeshGradient(width: 4, height: 4, points: [
-                SIMD2<Float>(0, 0), SIMD2<Float>(0.33, 0), SIMD2<Float>(0.66, 0), SIMD2<Float>(1, 0),
-                SIMD2<Float>(0, 0.34), SIMD2<Float>(0.26, 0.30), SIMD2<Float>(0.68, 0.38), SIMD2<Float>(1, 0.31),
-                SIMD2<Float>(0, 0.66), SIMD2<Float>(0.34, 0.71), SIMD2<Float>(0.73, 0.61), SIMD2<Float>(1, 0.69),
-                SIMD2<Float>(0, 1), SIMD2<Float>(0.33, 1), SIMD2<Float>(0.66, 1), SIMD2<Float>(1, 1),
-            ], colors: [
-                silkBright, silkDeep, silkDark, silkAzure,
-                silkAzure, silkHi, silkBright, silkDark,
-                silkDark, silkBright, silkHi, silkDeep,
-                silkDeep, silkDark, silkAzure, silkBright,
-            ])
-        } else {
-            LinearGradient(colors: [silkDark, silkBright, silkAzure, silkDeep],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-    }
 
     private func toggleMic() {
         if voice.listening {
@@ -298,6 +271,79 @@ struct SlantRight: Shape {
             p.addLine(to: CGPoint(x: r.minX, y: r.maxY))
             p.closeSubpath()
         }
+    }
+}
+
+/// Procedural blue satin (no bitmap): a diagonal blue gradient + a broad sheen bloom,
+/// overlaid with soft wavy "fold" ribbons (vector shapes filled with light/shadow
+/// gradients, blurred and rotated to a diagonal) so it reads as flowing silk.
+struct SilkBackground: View {
+    private static let deep = Color(red: 0.02, green: 0.15, blue: 0.34)
+    private static let azure = Color(red: 0.06, green: 0.40, blue: 0.68)
+    private static let bright = Color(red: 0.19, green: 0.60, blue: 0.86)
+
+    var body: some View {
+        GeometryReader { geo in
+            let d = max(geo.size.width, geo.size.height) * 1.9
+            ZStack {
+                LinearGradient(colors: [Self.deep, Self.azure, Self.bright, Self.azure, Self.deep],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [Self.bright.opacity(0.55), .clear],
+                               center: UnitPoint(x: 0.38, y: 0.30),
+                               startRadius: 0, endRadius: d * 0.5)
+                    .blendMode(.screen)
+                ZStack {
+                    // Light fold ridges.
+                    ForEach(0..<7, id: \.self) { i in
+                        SilkFold(amp: d * 0.05, freq: 1.7, phase: CGFloat(i) * 1.07, thickness: d * 0.085)
+                            .fill(LinearGradient(
+                                colors: [.clear, .white.opacity(i.isMultiple(of: 2) ? 0.16 : 0.07), .clear],
+                                startPoint: .top, endPoint: .bottom))
+                            .blendMode(.plusLighter)
+                            .offset(y: d * (CGFloat(i) / 6.0 - 0.5))
+                    }
+                    // Shadow valleys between them.
+                    ForEach(0..<6, id: \.self) { i in
+                        SilkFold(amp: d * 0.05, freq: 1.7, phase: CGFloat(i) * 1.31 + 0.6, thickness: d * 0.06)
+                            .fill(LinearGradient(
+                                colors: [.clear, .black.opacity(0.20), .clear],
+                                startPoint: .top, endPoint: .bottom))
+                            .blendMode(.multiply)
+                            .offset(y: d * (CGFloat(i) / 5.0 - 0.5) + d * 0.05)
+                    }
+                }
+                .frame(width: d, height: d)
+                .rotationEffect(.degrees(34))
+                .position(x: geo.size.width / 2, y: geo.size.height / 2)
+                .blur(radius: 7)
+            }
+        }
+    }
+}
+
+/// One horizontal wavy ribbon (a sine-modulated band of `thickness`). Filled with a
+/// vertical light or shadow gradient it reads as a single rounded silk crease.
+struct SilkFold: Shape {
+    var amp: CGFloat
+    var freq: CGFloat
+    var phase: CGFloat
+    var thickness: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, midY = rect.midY
+        let steps = 48
+        func cy(_ x: CGFloat) -> CGFloat { midY + amp * sin((x / w) * .pi * 2 * freq + phase) }
+        var p = Path()
+        p.move(to: CGPoint(x: 0, y: cy(0) - thickness / 2))
+        for s in 0...steps {
+            let x = w * CGFloat(s) / CGFloat(steps)
+            p.addLine(to: CGPoint(x: x, y: cy(x) - thickness / 2))
+        }
+        for s in stride(from: steps, through: 0, by: -1) {
+            let x = w * CGFloat(s) / CGFloat(steps)
+            p.addLine(to: CGPoint(x: x, y: cy(x) + thickness / 2))
+        }
+        p.closeSubpath()
+        return p
     }
 }
 
