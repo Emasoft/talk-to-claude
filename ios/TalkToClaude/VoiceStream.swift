@@ -28,7 +28,7 @@ final class VoiceStream: ObservableObject {
         self.settings = settings
         // Populate the cheat sheet immediately: prefer the last-cached server copy,
         // else the bundled default. It refreshes from the server when we connect.
-        let cached = UserDefaults.standard.data(forKey: "cheatsheet_v3")
+        let cached = UserDefaults.standard.data(forKey: "cheatsheet_v4")
         let bundled = Bundle.main.url(forResource: "cheatsheet", withExtension: "json")
             .flatMap { try? Data(contentsOf: $0) }
         if let data = cached ?? bundled,
@@ -128,7 +128,7 @@ final class VoiceStream: ObservableObject {
             if let groups = obj["groups"] as? [[String: Any]] {
                 cheatGroups = groups.compactMap(CheatGroup.from(json:))
                 if let data = try? JSONSerialization.data(withJSONObject: groups) {
-                    UserDefaults.standard.set(data, forKey: "cheatsheet_v3")
+                    UserDefaults.standard.set(data, forKey: "cheatsheet_v4")
                 }
             }
         case "mode":

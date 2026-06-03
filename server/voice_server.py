@@ -147,6 +147,13 @@ def execute_actions(session, actions):
             code, _, err = tmux("send-keys", "-t", session, *keys)
             if code != 0:
                 return False, err or f"send-keys ({value}) failed"
+        elif kind == "erase":
+            # Delete `value` characters to the left (edit modes: delete/replace/undo).
+            count = int(value)
+            if count > 0:
+                code, _, err = tmux("send-keys", "-t", session, "-N", str(count), "BSpace")
+                if code != 0:
+                    return False, err or "send-keys (erase) failed"
     return True, ""
 
 

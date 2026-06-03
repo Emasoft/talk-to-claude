@@ -924,5 +924,103 @@
         "role": "stop"
       }
     ]
+  },
+  {
+    "group": "editing",
+    "items": [
+      {
+        "say": "start delete mode",
+        "say_it": "modo cancella",
+        "out": "✂",
+        "label": "START DELETE MODE",
+        "triggers": [
+          "start delete mode",
+          "delete mode",
+          "inizia modo cancella",
+          "modo cancella"
+        ],
+        "pair": "delete",
+        "role": "start"
+      },
+      {
+        "say": "stop delete mode",
+        "say_it": "fine cancella",
+        "out": "✂ ✓",
+        "label": "STOP DELETE MODE",
+        "triggers": [
+          "stop delete mode",
+          "end delete mode",
+          "ferma modo cancella",
+          "fine modo cancella"
+        ],
+        "pair": "delete",
+        "role": "stop"
+      },
+      {
+        "say": "start replace mode",
+        "say_it": "modo sostituzione",
+        "out": "⇄",
+        "label": "START REPLACE MODE",
+        "triggers": [
+          "start replace mode",
+          "replace mode",
+          "inizia modo sostituzione",
+          "modo sostituzione"
+        ],
+        "pair": "replace",
+        "role": "start"
+      },
+      {
+        "say": "replace with",
+        "say_it": "sostituisci con",
+        "out": "→",
+        "label": "REPLACE WITH",
+        "triggers": [
+          "replace with",
+          "sostituisci con"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "stop replace mode",
+        "say_it": "fine sostituzione",
+        "out": "⇄ ✓",
+        "label": "STOP REPLACE MODE",
+        "triggers": [
+          "stop replace mode",
+          "end replace mode",
+          "ferma modo sostituzione",
+          "fine modo sostituzione"
+        ],
+        "pair": "replace",
+        "role": "stop"
+      },
+      {
+        "say": "undo",
+        "say_it": "annulla",
+        "out": "⎌",
+        "label": "undo",
+        "triggers": [
+          "undo",
+          "annulla"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "redo",
+        "say_it": "rifai",
+        "out": "↻",
+        "label": "redo",
+        "triggers": [
+          "redo",
+          "rifai",
+          "ripeti"
+        ],
+        "pair": null,
+        "role": null
+      }
+    ]
   }
 ]

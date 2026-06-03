@@ -191,7 +191,45 @@ RULES: list[dict] = [
      "triggers": ["stop spell mode", "spell mode stop", "end spell", "end spelling",
                   "stop spelling", "stop spell", "end letters", "normal mode",
                   "fine compitazione", "fine lettere", "modo normale", "basta lettere"]},
+
+    # ── editing the un-submitted line (only works until Enter is pressed) ─────
+    # DELETE pair: "start delete mode" <words> "stop delete mode" removes the first
+    # occurrence of <words> found to the LEFT of the cursor (the last typed one).
+    {"group": "editing", "label": "START DELETE MODE", "kind": "delete_start",
+     "pair": "delete", "role": "start",
+     "triggers": ["start delete mode", "delete mode", "inizia modo cancella", "modo cancella"]},
+    {"group": "editing", "label": "STOP DELETE MODE", "kind": "delete_stop",
+     "pair": "delete", "role": "stop",
+     "triggers": ["stop delete mode", "end delete mode", "ferma modo cancella",
+                  "fine modo cancella"]},
+    # REPLACE: "start replace mode" <find> "replace with" <new> "stop replace mode".
+    {"group": "editing", "label": "START REPLACE MODE", "kind": "replace_start",
+     "pair": "replace", "role": "start",
+     "triggers": ["start replace mode", "replace mode", "inizia modo sostituzione",
+                  "modo sostituzione"]},
+    {"group": "editing", "label": "REPLACE WITH", "kind": "replace_with",
+     "triggers": ["replace with", "sostituisci con"]},
+    {"group": "editing", "label": "STOP REPLACE MODE", "kind": "replace_stop",
+     "pair": "replace", "role": "stop",
+     "triggers": ["stop replace mode", "end replace mode", "ferma modo sostituzione",
+                  "fine modo sostituzione"]},
+    # UNDO / REDO the last word, deletion or replacement.
+    {"group": "editing", "label": "undo", "kind": "undo",
+     "triggers": ["undo", "annulla"]},
+    {"group": "editing", "label": "redo", "kind": "redo",
+     "triggers": ["redo", "rifai", "ripeti"]},
 ]
+
+# Edit-command kinds whose phrase must still be recognised WHILE capturing a
+# delete/replace target (everything else spoken in that window is literal text).
+_EDIT_CMDS = {"delete_stop", "replace_with", "replace_stop"}
+
+
+def _splice(line: str, idx: int, length: int, insert: str) -> str:
+    """Remove `length` chars at `idx` and insert `insert`, tidying word spacing."""
+    left = line[:idx].rstrip()
+    right = line[idx + length:].lstrip()
+    return " ".join(p for p in (left, insert.strip(), right) if p)
 
 _PUNCT = ".,!?;:\"'()[]{}"
 # Closing brackets always get a space after them; connectors (/ ~ - . :) glue to
@@ -257,9 +295,11 @@ _MAXW = max(len(p.split()) for p in _PHRASES)
 
 
 def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str]]:
-    # `modes` carries persistent state (spelling + case) ACROSS utterances. Pass a
-    # dict (mutated in place) to keep "caps mode"/"spell mode" on between sentences;
-    # pass nothing for a one-shot interpret (the default — tests use this).
+    # `modes` carries persistent state ACROSS utterances: spelling + case, AND the
+    # editable line buffer (`line`) with its undo/redo stacks and any in-progress
+    # delete/replace capture. Pass a dict (mutated in place) to keep all of that
+    # between sentences; pass nothing for a one-shot interpret (tests pass a dict
+    # explicitly when they need persistence).
     if modes is None:
         modes = {}
     tokens = transcript.split()
@@ -271,15 +311,58 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
     cap_once = False
     literal_once = False
     pending_close: str | None = None
+    spelling = modes.get("spelling", False)  # persists across utterances
+
+    # ── editable-line state (persists until Enter is pressed) ────────────────
+    line = modes.get("line", "")            # exact on-screen text since last Enter
+    undo: list[str] = modes.get("undo", [])  # prior line states (newest last)
+    redo: list[str] = modes.get("redo", [])
+    edit_mode = modes.get("edit_mode")      # None | delete | replace_find | replace_with
+    target: list[str] = modes.get("edit_target", [])  # captured find words
+    repl: list[str] = modes.get("edit_repl", [])      # captured replacement words
 
     def flush():
-        nonlocal buf
+        nonlocal buf, line
         if buf:
             s = buf[0][0]
             for piece, glue in buf[1:]:
                 s += ("" if glue else " ") + piece
             actions.append(("type", s))
+            undo.append(line)
+            redo.clear()
+            line += s
             buf = []
+
+    def apply_line(new_line: str):
+        # Rewrite the on-screen line: erase the whole thing, retype the new content.
+        nonlocal line
+        if new_line == line:
+            return
+        if line:
+            actions.append(("erase", str(len(line))))
+        if new_line:
+            actions.append(("type", new_line))
+        line = new_line
+
+    def do_delete(phrase: str):
+        if not phrase:
+            return
+        idx = line.rfind(phrase)  # LEFT of cursor = last occurrence
+        if idx == -1:
+            return
+        undo.append(line)
+        redo.clear()
+        apply_line(_splice(line, idx, len(phrase), ""))
+
+    def do_replace(find: str, with_text: str):
+        if not find:
+            return
+        idx = line.rfind(find)
+        if idx == -1:
+            return
+        undo.append(line)
+        redo.clear()
+        apply_line(_splice(line, idx, len(find), with_text))
 
     def style(w: str) -> str:
         nonlocal cap_once
@@ -306,8 +389,6 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
             next_glue = False  # a wrapped group is complete — space before the next word
             pending_close = None
 
-    spelling = modes.get("spelling", False)  # persists across utterances
-
     def emit_letter(ch: str):
         nonlocal next_glue, cap_once
         if case_mode == "upper":
@@ -322,6 +403,37 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
 
     i = 0
     while i < n:
+        # ── delete/replace capture: collect literal target/replacement words ──
+        if edit_mode is not None:
+            cmd = None
+            clen = 0
+            for w in range(min(_MAXW, n - i), 0, -1):
+                phrase = " ".join(_norm(t) for t in tokens[i:i + w])
+                r = _PHRASES.get(phrase)
+                if r and r["kind"] in _EDIT_CMDS:
+                    cmd, clen = r, w
+                    break
+            if cmd is not None:
+                k = cmd["kind"]
+                if edit_mode == "delete" and k == "delete_stop":
+                    do_delete(" ".join(target))
+                    edit_mode, target = None, []
+                    i += clen
+                    continue
+                if edit_mode == "replace_find" and k == "replace_with":
+                    edit_mode, repl = "replace_with", []
+                    i += clen
+                    continue
+                if edit_mode in ("replace_find", "replace_with") and k == "replace_stop":
+                    do_replace(" ".join(target), " ".join(repl))
+                    edit_mode, target, repl = None, [], []
+                    i += clen
+                    continue
+            # otherwise the token is a literal word of the target / replacement
+            (repl if edit_mode == "replace_with" else target).append(tokens[i])
+            i += 1
+            continue
+
         if literal_once:
             emit_word(tokens[i])
             literal_once = False
@@ -371,6 +483,11 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
         elif kind == "key":
             flush()
             actions.append(("key", matched["key"]))
+            if matched["key"] == "Enter":
+                # Sentence submitted — it's no longer editable. Reset the line state.
+                line, edit_mode, target, repl = "", None, [], []
+                undo.clear()
+                redo.clear()
         elif kind == "case":
             case_mode = matched["mode"]
         elif kind == "case_once":
@@ -382,18 +499,47 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
         elif kind == "wrap":
             emit_symbol(matched["open"])
             pending_close = matched["close"]
+        elif kind == "delete_start":
+            flush()
+            edit_mode, target = "delete", []
+        elif kind == "replace_start":
+            flush()
+            edit_mode, target, repl = "replace_find", [], []
+        elif kind == "undo":
+            flush()
+            if undo:
+                redo.append(line)
+                apply_line(undo.pop())
+        elif kind == "redo":
+            flush()
+            if redo:
+                undo.append(line)
+                apply_line(redo.pop())
+        # delete_stop / replace_with / replace_stop outside a capture are no-ops.
 
     flush()
     modes["spelling"] = spelling
     modes["case_mode"] = case_mode
+    modes["line"] = line
+    modes["undo"] = undo
+    modes["redo"] = redo
+    modes["edit_mode"] = edit_mode
+    modes["edit_target"] = target
+    modes["edit_repl"] = repl
     return actions
 
 
 def render(actions: list[tuple[str, str]]) -> str:
-    """Human-readable preview of what will be typed (keys shown as ⟨Key⟩)."""
+    """Human-readable preview of what will be typed (keys shown as ⟨Key⟩, an
+    erase of N chars as ⌫N)."""
     out = []
     for kind, val in actions:
-        out.append(val if kind == "type" else f"⟨{val}⟩")
+        if kind == "type":
+            out.append(val)
+        elif kind == "erase":
+            out.append(f"⌫{val}")
+        else:
+            out.append(f"⟨{val}⟩")
     return "".join(out)
 
 
@@ -426,6 +572,20 @@ def _rule_out(r: dict) -> str:
         return "→ words"
     if kind == "glue":
         return "no␣"
+    if kind == "delete_start":
+        return "✂"
+    if kind == "delete_stop":
+        return "✂ ✓"
+    if kind == "replace_start":
+        return "⇄"
+    if kind == "replace_with":
+        return "→"
+    if kind == "replace_stop":
+        return "⇄ ✓"
+    if kind == "undo":
+        return "⎌"
+    if kind == "redo":
+        return "↻"
     return str(r.get("label", ""))
 
 
@@ -491,6 +651,13 @@ IT_SAY = {
     "literal": "letterale",
     "start spell mode": "compitazione",
     "stop spell mode": "fine compitazione",
+    "start delete mode": "modo cancella",
+    "stop delete mode": "fine cancella",
+    "start replace mode": "modo sostituzione",
+    "replace with": "sostituisci con",
+    "stop replace mode": "fine sostituzione",
+    "undo": "annulla",
+    "redo": "rifai",
 }
 
 

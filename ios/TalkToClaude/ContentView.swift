@@ -97,8 +97,8 @@ struct ContentView: View {
             let pairs = modePairs(from: all)
             // Italian phrases run longer, so shrink the iPhone font a touch to keep
             // everything (including the mode pairs) on one screen.
-            let font: CGFloat = big ? 19 : (italian ? 9.5 : 11)
-            let pairW: CGFloat = big ? 320 : (italian ? 188 : 170)
+            let font: CGFloat = big ? 18 : (italian ? 8 : 9.5)
+            let pairW: CGFloat = big ? 300 : (italian ? 168 : 150)
             ScrollView {
                 if all.isEmpty {
                     Text("Tap the mic once to load the command list.")
@@ -111,7 +111,7 @@ struct ContentView: View {
                     // (columns: 0) to keep everything on one screen.
                     // Right-aligned: the output symbols line up near the right edge so
                     // you can scan a column of symbols, then read the phrase to its left.
-                    FlowLayout(spacing: big ? 6 : 4, columns: big ? 6 : 0, rightAligned: true) {
+                    FlowLayout(spacing: big ? 6 : 3, columns: big ? 6 : 0, rightAligned: true) {
                         ForEach(singles) { singleCell($0, fontSize: font) }
                         ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
                     }
