@@ -16,6 +16,7 @@ final class VoiceStream: ObservableObject {
     @Published var spellMode = false
     @Published var capsMode = "none"  // "none" | "upper" | "lower"
     @Published var editMode = ""      // "" | "delete" | "replace_find" | "replace_with"
+    @Published var symbolsMode = false // prefix-mode "command symbols" burst is active
 
     private let settings: AppSettings
     private let urlSession = URLSession(configuration: .default)
@@ -59,6 +60,7 @@ final class VoiceStream: ObservableObject {
             "session": session,
             "silence_hold": settings.pauseThreshold,  // pause (s) that ends a sentence
             "auto_send": settings.autoSend,            // submit each sentence automatically
+            "prefix_mode": settings.prefixMode,        // literal-by-default; commands need "command"
         ]
         if let data = try? JSONSerialization.data(withJSONObject: cfg),
            let json = String(data: data, encoding: .utf8) {
@@ -79,6 +81,7 @@ final class VoiceStream: ObservableObject {
         spellMode = false
         capsMode = "none"
         editMode = ""
+        symbolsMode = false
         liveTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -148,6 +151,7 @@ final class VoiceStream: ObservableObject {
             spellMode = (obj["spell"] as? Bool) ?? false
             capsMode = (obj["caps"] as? String) ?? "none"
             editMode = (obj["edit"] as? String) ?? ""
+            symbolsMode = (obj["symbols"] as? Bool) ?? false
         default:
             break
         }

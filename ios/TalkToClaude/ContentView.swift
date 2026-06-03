@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var audio = AudioStreamer()
     @State private var showSettings = false
     @State private var showSearch = false
+    @State private var showSessions = true   // collapsible Claude-session column
     @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var hSize
@@ -24,11 +25,18 @@ struct ContentView: View {
         ZStack {
             FluxBackground().ignoresSafeArea()
             GeometryReader { geo in
-                VStack(spacing: 0) {
-                    cheatSheet
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Transcript line count scales with screen height (min 3).
-                    bottomBar(transcriptLines: max(3, min(8, Int(geo.size.height / 200))))
+                HStack(spacing: 0) {
+                    if showSessions {
+                        sessionsSidebar
+                            .frame(width: min(240, max(150, geo.size.width * 0.42)))
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
+                    VStack(spacing: 0) {
+                        cheatSheet
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        // Transcript line count scales with screen height (min 3).
+                        bottomBar(transcriptLines: max(3, min(8, Int(geo.size.height / 200))))
+                    }
                 }
             }
         }
@@ -37,6 +45,21 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView(settings: settings, claude: claude) }
         .sheet(isPresented: $showSearch) { CheatSheetView(groups: voice.cheatGroups) }
         .onAppear { AVAudioApplication.requestRecordPermission { _ in } }
+        .task {
+            // Keep the Claude-session sidebar fresh while the app is foreground.
+            while !Task.isCancelled {
+                await claude.loadSessions()
+                // Auto-pick the first Claude ONLY when nothing has ever been chosen
+                // (empty, or the legacy "default" placeholder). A real selection is
+                // never overridden — so the Claude you pick is remembered across
+                // launches even if it briefly drops off the list.
+                if settings.session.isEmpty || settings.session == "default",
+                   let first = claude.sessions.first {
+                    settings.session = first.target
+                }
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background && voice.listening {
                 audio.stop()
@@ -87,39 +110,174 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Claude-session sidebar (collapsible column of running claude instances)
+
+    /// The collapsible left column listing every running Claude Code instance the
+    /// Mac discovered (tmux, excluding ai-maestro). Tap one to make it the dictation
+    /// target; the ☰ button in the bottom bar (or the chevron here) hides the column.
+    private var sessionsSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text("CLAUDES").font(.caption.weight(.heavy)).foregroundStyle(.white.opacity(0.7))
+                Spacer(minLength: 0)
+                Button { tapFeedback(); Task { await claude.loadSessions() } } label: {
+                    Image(systemName: "arrow.clockwise").font(.caption.weight(.bold))
+                }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7))
+                Button {
+                    tapFeedback()
+                    withAnimation(.easeInOut(duration: 0.2)) { showSessions = false }
+                } label: {
+                    Image(systemName: "sidebar.leading").font(.caption.weight(.bold))
+                }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.7))
+            }
+            .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+
+            if claude.sessions.isEmpty {
+                Text("No Claude sessions found.\nStart `claude` in a tmux window, then tap ⟳.")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                Spacer(minLength: 0)
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(claude.sessions) { sessionRow($0) }
+                    }
+                    .padding(.horizontal, 8).padding(.bottom, 8)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .trailing) { Rectangle().fill(.white.opacity(0.12)).frame(width: 1) }
+    }
+
+    private func sessionRow(_ s: ClaudeSession) -> some View {
+        let selected = settings.session == s.target
+        let title = (s.title ?? "").trimmingCharacters(in: .whitespaces)
+        let subtitle = title.isEmpty ? folderName(s.cwd) : title
+        return Button { selectSession(s) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(selected ? Color.green : .white.opacity(0.4))
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(s.label).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Text(s.kind == "iterm" ? "iTerm" : (s.kind == "terminal" ? "Term" : "tmux"))
+                            .font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                            .padding(.horizontal, 3).padding(.vertical, 1)
+                            .background(.white.opacity(0.12), in: Capsule())
+                    }
+                    Text(subtitle).font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.55)).lineLimit(1).truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Color.green.opacity(0.18) : Color.white.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(selected ? Color.green.opacity(0.55) : .white.opacity(0.12), lineWidth: 0.8))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Last path component of a working directory (for the dimmed second line).
+    private func folderName(_ path: String) -> String {
+        let trimmed = path.hasSuffix("/") && path.count > 1 ? String(path.dropLast()) : path
+        let leaf = (trimmed as NSString).lastPathComponent
+        return leaf.isEmpty ? trimmed : leaf
+    }
+
+    /// Make `s` the dictation target. If we're already streaming, reconnect so the
+    /// new target takes effect immediately (the target is sent only at connect time).
+    private func selectSession(_ s: ClaudeSession) {
+        tapFeedback()
+        settings.session = s.target
+        Task { await claude.focusSession(s.target) }   // bring its tab to the front on the Mac
+        guard voice.listening else { return }
+        voice.stop()
+        audio.stop()
+        audio.onPCM = { [weak voice] data in voice?.sendPCM(data) }
+        do {
+            try audio.start()
+            voice.start(session: settings.session)
+        } catch {
+            voice.lastError = "Mic restart failed: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Cheat sheet (variable-width chips that wrap; START/STOP modes paired)
 
     private var cheatSheet: some View {
         GeometryReader { geo in
-            let big = geo.size.width >= 980
+            // Pick sizing by HEIGHT, not width: an iPad stays tall in Split View even
+            // when its pane is narrow, so we keep the natural (un-scaled) iPad font and
+            // let the grid REFLOW into fewer columns / more rows. Only a genuinely short
+            // iPhone screen drops to the compact font. Chips must never be scaled down.
+            let tall = geo.size.height >= 900        // iPad-class pane (full OR Split View)
+            let big = geo.size.width >= 980          // room for the full 6-column grid
             let all = voice.cheatGroups.flatMap { $0.items }
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
-            // Italian phrases run longer, so shrink the iPhone font a touch to keep
-            // everything (including the mode pairs) on one screen.
-            let font: CGFloat = big ? 18 : (italian ? 8 : 9.5)
-            let pairW: CGFloat = big ? 300 : (italian ? 168 : 150)
-            ScrollView {
+            // Italian phrases run longer, so the compact iPhone font shrinks a touch.
+            let font: CGFloat = tall ? 18 : (italian ? 8 : 9.5)
+            let pairW: CGFloat = tall ? 300 : (italian ? 168 : 150)
+            // Column count tracks the available WIDTH so a narrow Split-View pane reflows
+            // to fewer (but full-size) columns instead of squeezing all six in. The full
+            // iPad keeps its 6-column grid; the iPhone tight-wraps (columns: 0).
+            let cols = tall ? (big ? 6 : max(2, min(5, Int(geo.size.width / 200)))) : 0
+            VStack(spacing: 0) {
+              if settings.prefixMode { prefixBanner }
+              ScrollView {
                 if all.isEmpty {
                     Text("Tap the mic once to load the command list.")
                         .font(.caption).foregroundStyle(.white.opacity(0.7))
                         .frame(maxWidth: .infinity).padding(.top, 24)
                 } else {
-                    // On the iPad there's room to snap chips to a 6-column grid so
-                    // rows line up vertically (left-tabbed). On the narrow iPhone the
-                    // full-length names don't leave room for that, so we tight-pack
-                    // (columns: 0) to keep everything on one screen.
+                    // On an iPad we snap chips to a column grid so rows line up
+                    // vertically; the column count follows the pane width, so a narrow
+                    // Split-View pane reflows to fewer full-size columns (chips are never
+                    // scaled). The iPhone tight-packs (columns: 0) to fit its small screen.
                     // Right-aligned: the output symbols line up near the right edge so
                     // you can scan a column of symbols, then read the phrase to its left.
-                    FlowLayout(spacing: big ? 6 : 3, columns: big ? 6 : 0, rightAligned: true) {
+                    FlowLayout(spacing: tall ? 6 : 3, columns: cols, rightAligned: true) {
                         ForEach(singles) { singleCell($0, fontSize: font) }
                         ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
                     }
                     .padding(10)
-                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .trailing)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height - (settings.prefixMode ? 40 : 0), alignment: .trailing)
                 }
+              }
             }
         }
+    }
+
+    /// Slim reminder shown above the chips while prefix mode is on. The prefix word is
+    /// constant for every chip, so it lives here once instead of bloating all ~70 chips
+    /// (which would re-widen them and undo the Split-View reflow). Also surfaces the
+    /// active "command symbols" burst.
+    private var prefixBanner: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "command").font(.caption2.weight(.bold))
+            Text(italian ? "Di’ “comando” prima di un comando" : "Say “command” before a command")
+                .font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            if voice.symbolsMode {
+                Text(italian ? "· SIMBOLI" : "· SYMBOLS")
+                    .font(.caption2.weight(.heavy)).foregroundStyle(Self.glassYellow)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.white.opacity(0.92))
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 0.7))
+        .padding(.horizontal, 10).padding(.top, 6).padding(.bottom, 2)
     }
 
     /// Collapse the START/STOP (and optional WITH) rules sharing a `pair` into ordered
@@ -180,7 +338,8 @@ struct ContentView: View {
         return HStack(spacing: -slant) {
             Text(say)
                 .fontWeight(.semibold).foregroundStyle(Self.glassYellow)
-                .font(.system(size: fontSize)).lineLimit(1).minimumScaleFactor(0.6)
+                .font(.system(size: fontSize)).lineLimit(1)
+                .minimumScaleFactor(sayFills ? 0.6 : 1)   // singles never scale; only fixed-width pairs may
                 .frame(maxWidth: sayFills ? .infinity : nil, alignment: .leading)
                 .padding(.leading, 11).padding(.trailing, slant + 8).padding(.vertical, 4)
                 .background(Self.chipSay.opacity(0.62))
@@ -227,6 +386,7 @@ struct ContentView: View {
                 if !voice.editMode.isEmpty {
                     modeBadge(voice.editMode == "delete" ? "DELETE" : "REPLACE", .red)
                 }
+                if voice.symbolsMode { modeBadge("SYMBOLS", .teal) }
                 Spacer(minLength: 6)
                 if !voice.lastError.isEmpty {
                     Text(voice.lastError)
@@ -249,6 +409,9 @@ struct ContentView: View {
                     }
                 }
                 .symbolEffect(.variableColor, isActive: voice.speaking)
+                iconButton("sidebar.leading") {
+                    withAnimation(.easeInOut(duration: 0.2)) { showSessions.toggle() }
+                }
                 Spacer(minLength: 6)
                 pillButton(italian ? "IT" : "EN") { italian.toggle() }
                 iconButton("magnifyingglass") { showSearch = true }

@@ -26,6 +26,9 @@ final class AppSettings: ObservableObject {
     @Published var pauseThreshold: Double { didSet { store.set(pauseThreshold, forKey: "pauseThreshold") } }
     /// Submit each sentence automatically (vs. saying "invio" to send).
     @Published var autoSend: Bool { didSet { store.set(autoSend, forKey: "autoSend") } }
+    /// Literal-by-default: dictation types verbatim and a command only fires when
+    /// preceded by the spoken prefix "command" (vs. command-by-default). Off = legacy.
+    @Published var prefixMode: Bool { didSet { store.set(prefixMode, forKey: "prefixMode") } }
 
     init() {
         // didSet does not fire for assignments made inside init, so these reads
@@ -33,9 +36,10 @@ final class AppSettings: ObservableObject {
         macIP = store.string(forKey: "macIP") ?? kDefaultMacIP
         port = store.string(forKey: "port") ?? "8765"
         token = store.string(forKey: "token") ?? kDefaultToken
-        session = store.string(forKey: "session") ?? "default"
+        session = store.string(forKey: "session") ?? ""   // "" = no Claude chosen yet
         pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
         autoSend = store.object(forKey: "autoSend") as? Bool ?? false
+        prefixMode = store.object(forKey: "prefixMode") as? Bool ?? false
     }
 
     /// Port parsed to an Int, falling back to the default if the field is junk.
