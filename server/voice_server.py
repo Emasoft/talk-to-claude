@@ -406,6 +406,19 @@ async def _focus_target(target: str) -> tuple[bool, str]:
             sess = app.get_session_by_id(addr)
             if sess is None:
                 return False, "iTerm session not found (closed?)"
+            # Covered-by-another-tab and split-pane (claude + the iTerm browser pane)
+            # cases: explicitly select the session's tab too (best-effort, a no-op if
+            # the API lacks it), then activate the pane + raise the window. Re-tapping
+            # the already-selected Claude re-runs all of this, so a tab buried behind
+            # others or split for the browser is brought back to the front.
+            try:
+                for w in app.windows:
+                    for t in w.tabs:
+                        if any(x.session_id == addr for x in t.sessions):
+                            await t.async_select()
+                            break
+            except Exception:  # noqa: BLE001
+                pass
             await sess.async_activate(select_tab=True, order_window_front=True)
             # The API raises the window WITHIN iTerm; `open -b` makes iTerm the active
             # app so the monitor actually shows it. Best-effort — the tab is already
