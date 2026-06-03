@@ -23,6 +23,12 @@ Dir.glob(File.join(src_dir, '*.swift')).sort.each do |path|
   target.add_file_references([ref])
 end
 
+# Metal shaders -> compiled into the target's default.metallib
+Dir.glob(File.join(src_dir, '*.metal')).sort.each do |path|
+  ref = group.new_reference(path)
+  target.add_file_references([ref])
+end
+
 # Asset catalog -> resources phase
 assets = File.join(src_dir, 'Assets.xcassets')
 target.add_resources([group.new_reference(assets)]) if File.exist?(assets)
