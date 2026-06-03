@@ -58,13 +58,15 @@ CASES = [
     ("tab key IT", "tabulazione done", "⟨Tab⟩done"),
 ]
 
-# Prefix mode (interpret(..., prefix_mode=True)): literal by default, commands need
-# the "command" prefix. (description, spoken, expected)
+# Prefix mode (interpret(..., prefix_mode=True)): literal by default; the grammar is a
+# nested scope stack (START="(", STOP=")", COMMAND takes ONE argument).
+# (description, spoken, expected)
 PREFIX_CASES = [
     # nothing fires without the prefix — not even space
     ("plain prose is literal", "enter the room and sit down", "enter the room and sit down"),
     ("space is literal without prefix", "alpha space beta", "alpha space beta"),
     ("the bang bug is gone", "She bang it", "She bang it"),
+    ("bare stop is literal (nothing open)", "stop right there", "stop right there"),
     # single command (multi-word commands are one unit)
     ("command + space", "command space", " "),
     ("command + key", "command enter", "⟨Enter⟩"),
@@ -80,7 +82,7 @@ PREFIX_CASES = [
      "this is a big errorr⌫12"),
     ("backword deletes N whole words",
      "alpha beta gamma command start backword 2 command stop", "alpha beta gamma⌫10"),
-    # mode units: command <MODE> start … <MODE> stop  (no prefix inside, bare stop)
+    # mode units (= ONE argument): command <MODE> start … <MODE> stop
     ("number unit → digits", "command number start four five number stop", "45"),
     ("caps unit", "command caps start deploy now caps stop ok", "DEPLOY NOW ok"),
     ("spell unit", "command spell start al em er spell stop", "lmr"),
@@ -89,6 +91,17 @@ PREFIX_CASES = [
     ("replace unit",
      "git status command replace start status replace with commit replace stop",
      "git status⌫10git commit"),
+    # nesting is still ONE argument: COMMAND(CAPS(SPELL(…)))
+    ("nested caps over spell (one arg)",
+     "command caps start spell start al em er spell stop caps stop", "LMR"),
+    # a single-argument COMMAND consumes its ONE block, then the rest is literal
+    ("one block then literal",
+     "command number start one number stop caps start spell start al em er spell stop caps stop",
+     "1 caps start spell start al em er spell stop caps stop"),
+    # a region (command start … command stop) concatenates MANY arguments
+    ("region concatenates siblings",
+     "command start number start one number stop caps start spell start al em er "
+     "spell stop caps stop command stop", "1LMR"),
 ]
 
 

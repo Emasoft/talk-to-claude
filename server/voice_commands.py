@@ -299,18 +299,24 @@ _MAXW = max(len(p.split()) for p in _PHRASES)
 
 # ── prefix mode (optional, toggled per-connection by the app) ────────────────
 # When enabled, dictation is LITERAL by default and NOTHING fires without the prefix
-# word ("command" / "comando") — not even space. Forms:
-#   • single:  "command <cmd>"                       → fires exactly one command
-#   • region:  "command start <cmds…> command stop"  → every word inside is a command
-#   • numbers: "command number start <words> number stop" → spoken numbers → digits
-#   • repeat:  "<cmd> <N> times"                      → repeat a command N times
+# word ("command" / "comando") — not even space. The grammar is a NESTED SCOPE STACK
+# where START = "(" and STOP = ")", and COMMAND takes exactly ONE argument:
+#   • single:  "command <cmd>"                       → fires exactly one command, then literal
+#   • mode unit (= one argument): "command <MODE> start … <MODE> stop"
+#         "command number start four five number stop"        → 45
+#         nesting is still one argument: CAPS(SPELL(…)) →
+#         "command caps start spell start al em er spell stop caps stop" → LMR
+#   • region (many arguments): "command start <blocks…> command stop"
+#         "command start number start one number stop caps start spell start al em er
+#          spell stop caps stop command stop"                  → 1LMR
+#   • repeat:  "<cmd> <N> times"                      → repeat — REGION-only
 #   • words:   "command backword <N>"                → delete N whole words back
-# The prefix only "arms" when a real command actually follows it, so "run this command"
-# still prints literally (the lookahead gate).
+# STOP pops the innermost open mode (LIFO). A bare STOP with nothing open is literal.
+# The prefix only "arms" when a real command follows it, so "run this command" still
+# prints literally (the lookahead gate).
 _PREFIX_WORDS = {"command", "commando", "commands", "comando", "comandi"}
 _START_WORDS = {"start", "begin", "inizio", "inizia"}
 _STOP_WORDS = {"stop", "end", "fine", "ferma", "basta", "termina"}
-_NUMBER_KW = {"number", "numbers", "numero", "numeri"}
 _TIMES_WORDS = {"times", "time", "volte", "volta"}
 
 # Modes that form a self-contained "command <MODE> start … <MODE> stop" unit: the
@@ -323,6 +329,10 @@ _MODE_WORDS = {
     "delete": "delete", "cancella": "delete",
     "replace": "replace", "sostituzione": "replace", "sostituisci": "replace",
 }
+# The poppable modes. caps is an ambient MODIFIER (uppercases) that nests over a
+# content mode; spell/number/delete/replace decide what a content word becomes.
+# A "<MODE> stop" pops whichever of these is innermost in the scope stack.
+_MODE_TAGS = {"caps", "spell", "number", "delete", "replace"}
 
 _NUM_ONES = {
     "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -373,22 +383,6 @@ def _parse_count(tokens: list[str], i: int) -> tuple[int | None, int]:
     return (v, 1) if v is not None else (None, 0)
 
 
-def _region_stop_len(tokens: list[str], i: int) -> int:
-    """Tokens spanned by a region-stop phrase at tokens[i] (0 if none). Accepts
-    'stop' / 'number stop' / 'command stop' / 'command number stop' (+ IT)."""
-    g = [_norm(tokens[j]) if j < len(tokens) else "" for j in range(i, i + 3)]
-    if g[0] in _PREFIX_WORDS:
-        if g[1] in _NUMBER_KW and g[2] in _STOP_WORDS:
-            return 3
-        if g[1] in _STOP_WORDS:
-            return 2
-    if g[0] in _NUMBER_KW and g[1] in _STOP_WORDS:
-        return 2
-    if g[0] in _STOP_WORDS:
-        return 1
-    return 0
-
-
 def interpret(transcript: str, modes: dict | None = None,
               prefix_mode: bool = False) -> list[tuple[str, str]]:
     # `modes` carries persistent state ACROSS utterances: spelling + case, AND the
@@ -408,8 +402,12 @@ def interpret(transcript: str, modes: dict | None = None,
     literal_once = False
     pending_close: str | None = None
     spelling = modes.get("spelling", False)  # persists across utterances
-    cmd_region = modes.get("sym_mode", False)    # "command start … command stop" (persists)
     num_region = modes.get("num_region", False)  # "command number start … number stop"
+    # prefix-mode nested scopes (persists across utterances). Frames:
+    #   'cmd'  — a "command start … command stop" region (many arguments)
+    #   'once' — a single-argument COMMAND, auto-popped when its one block completes
+    #   <mode> — caps | spell | number | delete | replace  (a START…STOP block)
+    stack: list[str] = list(modes.get("scope_stack", []))
 
     # ── editable-line state (persists until Enter is pressed) ────────────────
     line = modes.get("line", "")            # exact on-screen text since last Enter
@@ -484,18 +482,45 @@ def interpret(transcript: str, modes: dict | None = None,
             actions.append(("erase", str(cut)))
             line = line[:end]
 
-    def _mode_active(tag: str) -> bool:
-        if tag == "caps":
-            return case_mode == "upper"
-        if tag == "spell":
-            return spelling
-        if tag == "number":
-            return num_region
-        if tag == "delete":
-            return edit_mode == "delete"
-        if tag == "replace":
-            return edit_mode in ("replace_find", "replace_with")
-        return False
+    # ── prefix-mode scope stack: START pushes a frame, STOP pops the innermost ──
+    def _mode_open() -> bool:
+        return any(t in _MODE_TAGS for t in stack)
+
+    def push_mode(tag: str):
+        stack.append(tag)
+        enter_mode(tag)
+
+    def close_once():
+        # a single-argument COMMAND closes the moment its one block finishes
+        while stack and stack[-1] == "once":
+            stack.pop()
+
+    def pop_mode():
+        # Pop the innermost open mode; reset its flat state (or fire delete/replace);
+        # then auto-close a single-arg COMMAND now exposed. Back at the literal level,
+        # break the glue so following prose spaces normally (siblings inside a region
+        # keep gluing, because there the stack is NOT yet empty).
+        nonlocal next_glue
+        idx = next((k for k in range(len(stack) - 1, -1, -1) if stack[k] in _MODE_TAGS), None)
+        if idx is None:
+            return
+        tag = stack.pop(idx)
+        if not (tag in ("caps", "spell", "number") and tag in stack):
+            exit_mode(tag)        # a deeper frame of the same ambient mode keeps it on
+        close_once()
+        if not stack:
+            next_glue = False
+
+    def close_region():
+        # "command stop": unwind any nested modes, then the nearest 'cmd' region frame.
+        nonlocal next_glue
+        while stack and stack[-1] != "cmd":
+            pop_mode() if stack[-1] in _MODE_TAGS else stack.pop()
+        if stack and stack[-1] == "cmd":
+            stack.pop()
+        close_once()
+        if not stack:
+            next_glue = False
 
     def enter_mode(tag: str):
         nonlocal case_mode, spelling, num_region, edit_mode, target, repl
@@ -574,37 +599,45 @@ def interpret(transcript: str, modes: dict | None = None,
             ptok = _norm(tokens[i])
             nxt = _norm(tokens[i + 1]) if i + 1 < n else ""
             nxt2 = _norm(tokens[i + 2]) if i + 2 < n else ""
-            # 1. A bare "<MODE> stop" closes the active mode block (a unit — no prefix needed).
-            if ptok in _MODE_WORDS and nxt in _STOP_WORDS and _mode_active(_MODE_WORDS[ptok]):
-                exit_mode(_MODE_WORDS[ptok])
+            # A. Inside an open scope, "<MODE> start" enters a NESTED mode (no prefix).
+            if stack and ptok in _MODE_WORDS and nxt in _START_WORDS:
+                push_mode(_MODE_WORDS[ptok])
                 i += 2
                 continue
-            # 2. The "command" prefix: mode/region start-or-stop, a single command, or literal.
+            # B. "<MODE> stop" / bare "stop" pops the innermost open mode (LIFO). With
+            #    nothing open, a bare "stop" is literal text (handled by D/F below).
+            if ptok in _MODE_WORDS and nxt in _STOP_WORDS and _mode_open():
+                pop_mode()
+                i += 2
+                continue
+            if ptok in _STOP_WORDS and _mode_open():
+                pop_mode()
+                i += 1
+                continue
+            # C. The "command" prefix opens a new argument (or is literal via the gate).
             if ptok in _PREFIX_WORDS:
-                if nxt in _MODE_WORDS and nxt2 in _START_WORDS:     # "command <MODE> start"
-                    enter_mode(_MODE_WORDS[nxt])
-                    i += 3
-                    continue
-                if nxt in _MODE_WORDS and nxt2 in _STOP_WORDS:      # "command <MODE> stop"
-                    exit_mode(_MODE_WORDS[nxt])
-                    i += 3
-                    continue
-                if nxt in _START_WORDS:                             # "command start"
-                    cmd_region = True
+                if nxt in _START_WORDS:                          # "command start" → region (many args)
+                    stack.append("cmd")
                     i += 2
                     continue
-                if nxt in _STOP_WORDS:                              # "command stop"
-                    cmd_region = False
+                if nxt in _STOP_WORDS:                           # "command stop" → close the region
+                    close_region()
                     i += 2
                     continue
-                if _command_follows(tokens, i + 1):
-                    i += 1                          # eat the prefix; fall through to fire ONE command
+                if nxt in _MODE_WORDS and nxt2 in _START_WORDS:  # "command <MODE> start" = COMMAND(MODE(…))
+                    stack.append("once")
+                    push_mode(_MODE_WORDS[nxt])
+                    i += 3
+                    continue
+                if _command_follows(tokens, i + 1):              # "command <cmd>" = COMMAND(cmd), one arg
+                    stack.append("once")
+                    i += 1                          # fall through to fire ONE command; close_once() after
                 else:
                     emit_word(tokens[i])            # lookahead gate: bare "command" is literal
                     i += 1
                     continue
-            # 3. Inside the NUMBER block: spoken numbers → concatenated digits.
-            elif num_region:
+            # D. Inside the NUMBER block: spoken numbers → concatenated digits.
+            elif num_region and edit_mode is None:
                 v = _num_value(ptok)
                 if v is not None:
                     buf.append((str(v), next_glue))
@@ -613,19 +646,13 @@ def interpret(transcript: str, modes: dict | None = None,
                     emit_word(tokens[i])            # a non-number inside the block stays literal
                 i += 1
                 continue
-            # 4. Inside a generic command region: command-by-default until "command stop".
-            elif cmd_region:
-                slen = _region_stop_len(tokens, i)  # a bare "stop" also ends the region
-                if slen:
-                    cmd_region = False
-                    i += slen
-                    continue
-                # else fall through → command-by-default
-            # 5. A delete/replace/spell block is active → words inside take no prefix; fall
+            # E. A delete/replace/spell block is open → words inside take no prefix; fall
             #    through to the capture / spelling handlers below.
             elif edit_mode is not None or spelling:
                 pass
-            # 6. Otherwise literal-by-default (a caps block just uppercases via style()).
+            # F. Inside a generic command region/once → command-by-default; else literal.
+            elif stack:
+                pass
             else:
                 emit_word(tokens[i])
                 i += 1
@@ -697,13 +724,15 @@ def interpret(transcript: str, modes: dict | None = None,
             cnt, cons = _parse_count(tokens, i + mlen)
             do_backword(cnt if cnt is not None else 1)
             i += mlen + (cons if cnt is not None else 0)
+            if prefix_mode:
+                close_once()          # a single-arg "command backword <N>" ends here
             continue
 
         # "<command> <N> times" repeats — ONLY inside a "command start … command stop"
-        # region. In single form the trailing "<N> times" stays literal text (by design,
-        # so "command backspace twelve times" is ⌫ then the words "twelve times").
+        # region (a 'cmd' frame). In single form the trailing "<N> times" stays literal
+        # text (by design, so "command backspace twelve times" is ⌫ then "twelve times").
         rep = 1
-        if cmd_region:
+        if "cmd" in stack:
             cnt, cons = _parse_count(tokens, i + mlen)
             if cnt is not None and i + mlen + cons < n and _norm(tokens[i + mlen + cons]) in _TIMES_WORDS:
                 rep = max(1, min(cnt, 1000))
@@ -774,9 +803,15 @@ def interpret(transcript: str, modes: dict | None = None,
                 apply_line(redo.pop())
         # delete_stop / replace_with / replace_stop outside a capture are no-ops.
 
+        # A single-argument COMMAND (e.g. "command slash") fires exactly one command,
+        # then its 'once' frame closes so everything after is literal again.
+        if prefix_mode:
+            close_once()
+
     flush()
     modes["spelling"] = spelling
-    modes["sym_mode"] = cmd_region
+    modes["scope_stack"] = stack
+    modes["sym_mode"] = bool(stack)   # app "symbols" indicator: any command scope open
     modes["num_region"] = num_region
     modes["case_mode"] = case_mode
     modes["line"] = line

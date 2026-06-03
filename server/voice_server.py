@@ -831,7 +831,7 @@ async def handle_focus(request):
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
 _LINE_KEYS = ("line", "undo", "redo", "edit_mode", "edit_target", "edit_repl",
-              "case_mode", "spelling", "sym_mode", "num_region")
+              "case_mode", "spelling", "sym_mode", "num_region", "scope_stack")
 
 
 def _snapshot_modes(m: dict) -> dict:
