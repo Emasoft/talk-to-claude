@@ -831,7 +831,7 @@ async def handle_focus(request):
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
 _LINE_KEYS = ("line", "undo", "redo", "edit_mode", "edit_target", "edit_repl",
-              "case_mode", "spelling", "sym_mode")
+              "case_mode", "spelling", "sym_mode", "num_region")
 
 
 def _snapshot_modes(m: dict) -> dict:
@@ -951,9 +951,10 @@ async def handle_stream(request):
                             | ({} if ok else {"error": err})
                         )
                         now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
-                               modes.get("edit_mode"), bool(modes.get("sym_mode")))
+                               modes.get("edit_mode"),
+                               bool(modes.get("sym_mode")) or bool(modes.get("num_region")))
                         was = (bool(before["spelling"]), before["case_mode"], before["edit_mode"],
-                               bool(before.get("sym_mode")))
+                               bool(before.get("sym_mode")) or bool(before.get("num_region")))
                         if now != was:
                             await ws.send_json({"type": "mode", "spell": now[0], "caps": now[1],
                                                 "edit": now[2], "symbols": now[3]})

@@ -41,6 +41,8 @@ RULES: list[dict] = [
      "triggers": ["arrow up", "up arrow", "freccia su", "freccia in su"]},
     {"group": "keys", "label": "↓", "kind": "key", "key": "Down",
      "triggers": ["arrow down", "down arrow", "freccia giù", "freccia in giù"]},
+    {"group": "keys", "label": "␣ space", "kind": "char", "char": " ",
+     "triggers": ["space", "spacebar", "space bar", "spazio"]},
 
     # ── slashes / paths ──────────────────────────────────────────────────────
     {"group": "paths", "label": "/", "kind": "char", "char": "/",
@@ -217,6 +219,9 @@ RULES: list[dict] = [
      "triggers": ["undo", "annulla"]},
     {"group": "editing", "label": "redo", "kind": "redo",
      "triggers": ["redo", "rifai", "ripeti"]},
+    # "backword <N>" deletes N whole words back (with the spaces between them).
+    {"group": "editing", "label": "⌫ word(s)", "kind": "backword",
+     "triggers": ["backword", "backwords", "backward", "backwards", "back word"]},
 ]
 
 # Edit-command kinds whose phrase must still be recognised WHILE capturing a
@@ -293,16 +298,46 @@ for _r in RULES:
 _MAXW = max(len(p.split()) for p in _PHRASES)
 
 # ── prefix mode (optional, toggled per-connection by the app) ────────────────
-# When enabled, dictation is LITERAL by default and a command fires ONLY when
-# preceded by the prefix word ("command" / "comando"). This trades terser symbol
-# entry for zero false-positives on prose — "enter the room", "She bang it" stay
-# literal. The prefix only "arms" when a real command actually follows it, so the
-# word itself ("run this command") still prints literally (the lookahead gate). A
-# "command symbols" … "command words" burst re-enables command-by-default so dense
-# paths/code don't need a prefix on every token.
+# When enabled, dictation is LITERAL by default and NOTHING fires without the prefix
+# word ("command" / "comando") — not even space. Forms:
+#   • single:  "command <cmd>"                       → fires exactly one command
+#   • region:  "command start <cmds…> command stop"  → every word inside is a command
+#   • numbers: "command number start <words> number stop" → spoken numbers → digits
+#   • repeat:  "<cmd> <N> times"                      → repeat a command N times
+#   • words:   "command backword <N>"                → delete N whole words back
+# The prefix only "arms" when a real command actually follows it, so "run this command"
+# still prints literally (the lookahead gate).
 _PREFIX_WORDS = {"command", "commando", "commands", "comando", "comandi"}
-_SYMBOLS_WORDS = {"symbols", "symbol", "simboli", "simbolo"}          # enter burst
-_WORDS_WORDS = {"words", "word", "prose", "text", "parole", "testo"}  # leave burst
+_START_WORDS = {"start", "begin", "inizio", "inizia"}
+_STOP_WORDS = {"stop", "end", "fine", "ferma", "basta", "termina"}
+_NUMBER_KW = {"number", "numbers", "numero", "numeri"}
+_TIMES_WORDS = {"times", "time", "volte", "volta"}
+
+# Modes that form a self-contained "command <MODE> start … <MODE> stop" unit: the
+# words inside need no prefix and the closing "<MODE> stop" needs no "command".
+_MODE_WORDS = {
+    "caps": "caps", "capital": "caps", "capitals": "caps", "uppercase": "caps",
+    "maiuscolo": "caps", "maiuscole": "caps",
+    "spell": "spell", "spelling": "spell", "compita": "spell", "compitazione": "spell",
+    "number": "number", "numbers": "number", "numero": "number", "numeri": "number",
+    "delete": "delete", "cancella": "delete",
+    "replace": "replace", "sostituzione": "replace", "sostituisci": "replace",
+}
+
+_NUM_ONES = {
+    "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+    "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "uno": 1, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6, "sette": 7,
+    "otto": 8, "nove": 9, "dieci": 10, "undici": 11, "dodici": 12, "tredici": 13,
+    "quattordici": 14, "quindici": 15, "sedici": 16,
+}
+_NUM_TENS = {
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+    "seventy": 70, "eighty": 80, "ninety": 90,
+    "venti": 20, "trenta": 30, "quaranta": 40, "cinquanta": 50,
+}
 
 
 def _command_follows(tokens: list[str], j: int) -> bool:
@@ -312,6 +347,46 @@ def _command_follows(tokens: list[str], j: int) -> bool:
         if " ".join(_norm(t) for t in tokens[j:j + w]) in _PHRASES:
             return True
     return False
+
+
+def _num_value(tok: str) -> int | None:
+    """Single token → its numeric value (digit or number word), else None."""
+    if tok.isdigit():
+        return int(tok)
+    if tok in _NUM_TENS:
+        return _NUM_TENS[tok]
+    return _NUM_ONES.get(tok)
+
+
+def _parse_count(tokens: list[str], i: int) -> tuple[int | None, int]:
+    """Parse a count at tokens[i] — a digit, a number word, or a 'twenty five'
+    compound. Returns (value, tokens_consumed) or (None, 0)."""
+    if i >= len(tokens):
+        return None, 0
+    t0 = _norm(tokens[i])
+    if t0 in _NUM_TENS:
+        t1 = _norm(tokens[i + 1]) if i + 1 < len(tokens) else ""
+        if t1 in _NUM_ONES and _NUM_ONES[t1] < 10:
+            return _NUM_TENS[t0] + _NUM_ONES[t1], 2
+        return _NUM_TENS[t0], 1
+    v = _num_value(t0)
+    return (v, 1) if v is not None else (None, 0)
+
+
+def _region_stop_len(tokens: list[str], i: int) -> int:
+    """Tokens spanned by a region-stop phrase at tokens[i] (0 if none). Accepts
+    'stop' / 'number stop' / 'command stop' / 'command number stop' (+ IT)."""
+    g = [_norm(tokens[j]) if j < len(tokens) else "" for j in range(i, i + 3)]
+    if g[0] in _PREFIX_WORDS:
+        if g[1] in _NUMBER_KW and g[2] in _STOP_WORDS:
+            return 3
+        if g[1] in _STOP_WORDS:
+            return 2
+    if g[0] in _NUMBER_KW and g[1] in _STOP_WORDS:
+        return 2
+    if g[0] in _STOP_WORDS:
+        return 1
+    return 0
 
 
 def interpret(transcript: str, modes: dict | None = None,
@@ -333,7 +408,8 @@ def interpret(transcript: str, modes: dict | None = None,
     literal_once = False
     pending_close: str | None = None
     spelling = modes.get("spelling", False)  # persists across utterances
-    sym_mode = modes.get("sym_mode", False)  # prefix-mode symbols burst (persists)
+    cmd_region = modes.get("sym_mode", False)    # "command start … command stop" (persists)
+    num_region = modes.get("num_region", False)  # "command number start … number stop"
 
     # ── editable-line state (persists until Enter is pressed) ────────────────
     line = modes.get("line", "")            # exact on-screen text since last Enter
@@ -386,6 +462,71 @@ def interpret(transcript: str, modes: dict | None = None,
         redo.clear()
         apply_line(_splice(line, idx, len(find), with_text))
 
+    def do_backword(n_words: int):
+        # Delete the last n_words whole words (and the spaces among them) from the
+        # editable line, keeping the boundary space that precedes the deleted run.
+        nonlocal line
+        flush()                       # commit any pending typed text so `line` is current
+        if not line or n_words <= 0:
+            return
+        end = len(line)
+        for _ in range(n_words):
+            j = end
+            while j > 0 and line[j - 1] == " ":   # skip spaces left of the word
+                j -= 1
+            while j > 0 and line[j - 1] != " ":    # skip the word itself
+                j -= 1
+            end = j
+        cut = len(line) - end
+        if cut > 0:
+            undo.append(line)
+            redo.clear()
+            actions.append(("erase", str(cut)))
+            line = line[:end]
+
+    def _mode_active(tag: str) -> bool:
+        if tag == "caps":
+            return case_mode == "upper"
+        if tag == "spell":
+            return spelling
+        if tag == "number":
+            return num_region
+        if tag == "delete":
+            return edit_mode == "delete"
+        if tag == "replace":
+            return edit_mode in ("replace_find", "replace_with")
+        return False
+
+    def enter_mode(tag: str):
+        nonlocal case_mode, spelling, num_region, edit_mode, target, repl
+        if tag == "caps":
+            case_mode = "upper"
+        elif tag == "spell":
+            spelling = True
+        elif tag == "number":
+            num_region = True
+        elif tag == "delete":
+            flush()
+            edit_mode, target = "delete", []
+        elif tag == "replace":
+            flush()
+            edit_mode, target, repl = "replace_find", [], []
+
+    def exit_mode(tag: str):
+        nonlocal case_mode, spelling, num_region, edit_mode, target, repl
+        if tag == "caps":
+            case_mode = "none"
+        elif tag == "spell":
+            spelling = False
+        elif tag == "number":
+            num_region = False
+        elif tag == "delete":
+            do_delete(" ".join(target))
+            edit_mode, target = None, []
+        elif tag == "replace":
+            do_replace(" ".join(target), " ".join(repl))
+            edit_mode, target, repl = None, [], []
+
     def style(w: str) -> str:
         nonlocal cap_once
         if case_mode == "upper":
@@ -425,30 +566,68 @@ def interpret(transcript: str, modes: dict | None = None,
 
     i = 0
     while i < n:
-        # ── prefix mode: literal by default; a command needs the "command" prefix ──
-        # The prefix word is consumed in place and we fall through to fire the command
-        # in the SAME iteration, so no cross-token "armed" state is needed. The burst
-        # switch ("command symbols/words") and the lookahead gate live here too.
+        # ── prefix mode: literal by default; NOTHING fires without the "command" prefix
+        #    Single   : "command <cmd>"
+        #    Region   : "command start … command stop"   (loose commands; <N> times here)
+        #    Mode unit: "command <MODE> start … <MODE> stop"  (no prefix inside; bare stop)
         if prefix_mode:
             ptok = _norm(tokens[i])
+            nxt = _norm(tokens[i + 1]) if i + 1 < n else ""
+            nxt2 = _norm(tokens[i + 2]) if i + 2 < n else ""
+            # 1. A bare "<MODE> stop" closes the active mode block (a unit — no prefix needed).
+            if ptok in _MODE_WORDS and nxt in _STOP_WORDS and _mode_active(_MODE_WORDS[ptok]):
+                exit_mode(_MODE_WORDS[ptok])
+                i += 2
+                continue
+            # 2. The "command" prefix: mode/region start-or-stop, a single command, or literal.
             if ptok in _PREFIX_WORDS:
-                nxt = _norm(tokens[i + 1]) if i + 1 < n else ""
-                if nxt in _SYMBOLS_WORDS:        # "command symbols" → command-by-default burst
-                    sym_mode = True
+                if nxt in _MODE_WORDS and nxt2 in _START_WORDS:     # "command <MODE> start"
+                    enter_mode(_MODE_WORDS[nxt])
+                    i += 3
+                    continue
+                if nxt in _MODE_WORDS and nxt2 in _STOP_WORDS:      # "command <MODE> stop"
+                    exit_mode(_MODE_WORDS[nxt])
+                    i += 3
+                    continue
+                if nxt in _START_WORDS:                             # "command start"
+                    cmd_region = True
                     i += 2
                     continue
-                if nxt in _WORDS_WORDS:          # "command words" → back to literal
-                    sym_mode = False
+                if nxt in _STOP_WORDS:                              # "command stop"
+                    cmd_region = False
                     i += 2
                     continue
                 if _command_follows(tokens, i + 1):
-                    i += 1                        # eat the prefix, then fall through to fire it
+                    i += 1                          # eat the prefix; fall through to fire ONE command
                 else:
-                    emit_word(tokens[i])          # lookahead gate: bare "command" is literal
+                    emit_word(tokens[i])            # lookahead gate: bare "command" is literal
                     i += 1
                     continue
-            elif not sym_mode and edit_mode is None and not spelling:
-                emit_word(tokens[i])              # literal-by-default
+            # 3. Inside the NUMBER block: spoken numbers → concatenated digits.
+            elif num_region:
+                v = _num_value(ptok)
+                if v is not None:
+                    buf.append((str(v), next_glue))
+                    next_glue = True
+                else:
+                    emit_word(tokens[i])            # a non-number inside the block stays literal
+                i += 1
+                continue
+            # 4. Inside a generic command region: command-by-default until "command stop".
+            elif cmd_region:
+                slen = _region_stop_len(tokens, i)  # a bare "stop" also ends the region
+                if slen:
+                    cmd_region = False
+                    i += slen
+                    continue
+                # else fall through → command-by-default
+            # 5. A delete/replace/spell block is active → words inside take no prefix; fall
+            #    through to the capture / spelling handlers below.
+            elif edit_mode is not None or spelling:
+                pass
+            # 6. Otherwise literal-by-default (a caps block just uppercases via style()).
+            else:
+                emit_word(tokens[i])
                 i += 1
                 continue
 
@@ -513,6 +692,23 @@ def interpret(transcript: str, modes: dict | None = None,
             i += 1
             continue
 
+        # "backword <N>" — delete N whole words from the end of the editable line.
+        if matched["kind"] == "backword":
+            cnt, cons = _parse_count(tokens, i + mlen)
+            do_backword(cnt if cnt is not None else 1)
+            i += mlen + (cons if cnt is not None else 0)
+            continue
+
+        # "<command> <N> times" repeats — ONLY inside a "command start … command stop"
+        # region. In single form the trailing "<N> times" stays literal text (by design,
+        # so "command backspace twelve times" is ⌫ then the words "twelve times").
+        rep = 1
+        if cmd_region:
+            cnt, cons = _parse_count(tokens, i + mlen)
+            if cnt is not None and i + mlen + cons < n and _norm(tokens[i + mlen + cons]) in _TIMES_WORDS:
+                rep = max(1, min(cnt, 1000))
+                mlen += cons + 1
+
         i += mlen
         kind = matched["kind"]
         if kind == "spell_on":
@@ -520,7 +716,8 @@ def interpret(transcript: str, modes: dict | None = None,
         elif kind == "spell_off":
             spelling = False
         elif kind == "char":
-            emit_symbol(matched["char"])
+            for _ in range(rep):
+                emit_symbol(matched["char"])
         elif kind == "fence":
             # fence glues a following language word ("```python") but not the prev.
             buf.append(("```", next_glue))
@@ -531,12 +728,23 @@ def interpret(transcript: str, modes: dict | None = None,
             next_glue = True
         elif kind == "key":
             flush()
-            actions.append(("key", matched["key"]))
-            if matched["key"] == "Enter":
-                # Sentence submitted — it's no longer editable. Reset the line state.
-                line, edit_mode, target, repl = "", None, [], []
-                undo.clear()
+            key = matched["key"]
+            if key == "BSpace" and line:
+                # N backspaces == erase N chars; also keep the line buffer in sync so a
+                # following backword / delete still lines up with what's on screen.
+                cut = min(rep, len(line))
+                undo.append(line)
                 redo.clear()
+                actions.append(("erase", str(cut)))
+                line = line[: len(line) - cut]
+            else:
+                for _ in range(rep):
+                    actions.append(("key", key))
+                if key == "Enter":
+                    # Sentence submitted — it's no longer editable. Reset the line state.
+                    line, edit_mode, target, repl = "", None, [], []
+                    undo.clear()
+                    redo.clear()
         elif kind == "case":
             case_mode = matched["mode"]
         elif kind == "case_once":
@@ -568,7 +776,8 @@ def interpret(transcript: str, modes: dict | None = None,
 
     flush()
     modes["spelling"] = spelling
-    modes["sym_mode"] = sym_mode
+    modes["sym_mode"] = cmd_region
+    modes["num_region"] = num_region
     modes["case_mode"] = case_mode
     modes["line"] = line
     modes["undo"] = undo

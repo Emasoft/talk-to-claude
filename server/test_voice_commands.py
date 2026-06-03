@@ -61,25 +61,34 @@ CASES = [
 # Prefix mode (interpret(..., prefix_mode=True)): literal by default, commands need
 # the "command" prefix. (description, spoken, expected)
 PREFIX_CASES = [
+    # nothing fires without the prefix — not even space
     ("plain prose is literal", "enter the room and sit down", "enter the room and sit down"),
+    ("space is literal without prefix", "alpha space beta", "alpha space beta"),
     ("the bang bug is gone", "She bang it", "She bang it"),
-    ("dotted words stay literal", "the dot product of a and b", "the dot product of a and b"),
+    # single command (multi-word commands are one unit)
+    ("command + space", "command space", " "),
     ("command + key", "command enter", "⟨Enter⟩"),
     ("command + arrow", "command arrow up", "⟨Up⟩"),
     ("command + slash glues like a path", "open src command slash main", "open src/main"),
     ("each command needs its own prefix",
-     "command open parentheses foo command close parentheses", "(foo)"),
+     "command open quotes frank command close quotes", '"frank"'),
     ("lookahead gate — bare 'command' is literal", "run this command please", "run this command please"),
-    ("trailing 'command' is literal", "use the slash command", "use the slash command"),
-    ("symbols burst for a path",
-     "command symbols tilde slash Code slash my dash project slash command words",
-     "~/Code/my-project/"),
-    ("caps via prefix",
-     "command start caps mode deploy now command stop caps mode ok", "DEPLOY NOW ok"),
-    ("spell via prefix", "command spell mode al em er command stop spell mode", "lmr"),
-    ("delete via prefix",
-     "hello world command start delete mode world command stop delete mode", "hello world⌫11hello"),
-    ("submit via prefix", "ship it command enter", "ship it⟨Enter⟩"),
+    # repeat is REGION-only — in single form the trailing "<N> times" stays literal
+    ("times is literal in single form", "command backspace twelve times", "⟨BSpace⟩twelve times"),
+    ("times repeats inside a region (erases N chars)",
+     "this is a big errorr command start backspace twelve times command stop",
+     "this is a big errorr⌫12"),
+    ("backword deletes N whole words",
+     "alpha beta gamma command start backword 2 command stop", "alpha beta gamma⌫10"),
+    # mode units: command <MODE> start … <MODE> stop  (no prefix inside, bare stop)
+    ("number unit → digits", "command number start four five number stop", "45"),
+    ("caps unit", "command caps start deploy now caps stop ok", "DEPLOY NOW ok"),
+    ("spell unit", "command spell start al em er spell stop", "lmr"),
+    ("delete unit",
+     "hello world command delete start world delete stop", "hello world⌫11hello"),
+    ("replace unit",
+     "git status command replace start status replace with commit replace stop",
+     "git status⌫10git commit"),
 ]
 
 
