@@ -135,8 +135,9 @@ def main() -> int:
     m: dict = {}
     persist = (
         render(interpret("caps mode a", m)) == "A"
-        and render(interpret("b c", m)) == "B C"   # caps persisted into a new utterance
-        and render(interpret("caps mode stop d", m)) == "d"
+        # caps persists into a new utterance; continuations are space-separated
+        and render(interpret("b c", m)) == " B C"
+        and render(interpret("caps mode stop d", m)) == " d"
     )
     print(f"persistent modes across utterances: {'PASS' if persist else 'FAIL'}")
     if not persist:
@@ -153,12 +154,27 @@ def main() -> int:
     p2 = {}
     interpret("command", p2, prefix_mode=True)
     retro = retro and (render(interpret("start space command stop", p2, prefix_mode=True)) == "⌫7 ")
-    # but a lone "command" followed by plain prose KEEPS the literal word (no erase)
+    # but a lone "command" followed by plain prose KEEPS the literal word (space-joined)
     p3 = {}
     interpret("command", p3, prefix_mode=True)
-    retro = retro and (render(interpret("hello there", p3, prefix_mode=True)) == "hello there")
+    retro = retro and (render(interpret("hello there", p3, prefix_mode=True)) == " hello there")
     print(f"lone 'command' self-corrects retroactively: {'PASS' if retro else 'FAIL'}")
     if not retro:
+        failed += 1
+
+    # Continuation merge: a thinking pause splits one sentence; the continuation
+    # opens with a continuation word, so we strip Whisper's pause-"?" and lowercase
+    # the opener, flowing the two fragments into one line.
+    c = {}
+    interpret("Can't you replace?", c, prefix_mode=True)        # fragment ends with "?"
+    merged = render(interpret("The fake stripe test better.", c, prefix_mode=True))
+    cont = (merged == "⌫1 the fake stripe test better.")
+    # two genuine sentences (opener is NOT a continuation word) just get a space
+    d = {}
+    interpret("First sentence.", d, prefix_mode=True)
+    cont = cont and (render(interpret("Second one.", d, prefix_mode=True)) == " Second one.")
+    print(f"continuation merge across a pause: {'PASS' if cont else 'FAIL'}")
+    if not cont:
         failed += 1
 
     # Whisper hallucination filter: canned phrases / punctuation / music -> dropped;

@@ -27,7 +27,13 @@ iPhone/iPad (SwiftUI)  ──WebSocket(PCM16 16kHz)──►  Mac server (aiohtt
 uv run --project . python server/voice_server.py
 curl -s http://<tailscale-ip>:8765/health          # -> {"ok": true}   (localhost will NOT answer)
 
-# After editing any server/*.py, RESTART the server (interpreter is imported at startup).
+# After editing any server/*.py you MUST RESTART (the interpreter is imported once at
+# startup). The aiohttp server IGNORES SIGTERM, so a plain `kill` does NOT stop it —
+# the old code keeps the port and a fresh launch dies with "address already in use"
+# (while /health still says ok, answered by the OLD server — misleading!). Always:
+#   1. find the port owner:  lsof -nP -iTCP:8765 -sTCP:LISTEN
+#   2. kill -9 <that pid> (and its `uv run` parent)
+#   3. relaunch, then VERIFY the NEW pid owns 8765 (not just that /health is ok)
 
 # Interpreter tests
 cd server && python3 test_voice_commands.py
@@ -89,6 +95,25 @@ edit_mode` mirrors), snapshotted in the server's `_LINE_KEYS` for injection roll
 
 > NOT the same as default mode (prefix OFF): there commands convert automatically
 > (command-by-default) with independent `caps`/`spell` toggles, no scope stack.
+
+### Retroactive heuristics (context self-correction)
+
+Heuristics are RETROACTIVE — write the best guess now, self-correct when more is
+heard (a thinking pause splits one thought into two utterances; we stitch them):
+
+- **Lone "command" across a pause** — a lone `command` utterance is typed
+  PROVISIONALLY, then if the NEXT utterance opens with a command / `start` /
+  `<mode> start`, that word is deleted and re-run as `command <next>`. Plain prose
+  after it keeps the literal word `command`. (`armed_prefix_erase` in `modes`.)
+- **Continuation merge** — every continuation of a non-submitted line is
+  space-separated (no more `replace?The`). If the previous fragment ends with
+  pause-punctuation Whisper guessed (`. ? ! ,`) AND this one opens with a
+  CONTINUATION word (`the/with/and/that/…`, `_CONTINUATION_WORDS`), that
+  punctuation is stripped and the opener lowercased, so the fragments flow as one
+  sentence: `"Can't you replace?"` + `"The fake … better."` → `Can't you replace
+  the fake … better.` Heuristic — it can over-merge two genuinely separate
+  sentences when the second opens with a continuation word; tune the word set if so.
+  Both require `auto_send` OFF (an auto-sent line is already committed).
 
 When you change this grammar: edit `voice_commands.py`, add/adjust cases in
 `test_voice_commands.py` until green, restart the server, AND update

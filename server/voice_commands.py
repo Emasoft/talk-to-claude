@@ -334,6 +334,24 @@ _MODE_WORDS = {
 # A "<MODE> stop" pops whichever of these is innermost in the scope stack.
 _MODE_TAGS = {"caps", "spell", "number", "delete", "replace"}
 
+# Words that, when an utterance OPENS with them right after a thinking pause,
+# signal a continuation of the previous fragment rather than a new sentence — so
+# we strip the pause-punctuation Whisper guessed and lowercase the opener, merging
+# the two into one flowing sentence. Single-letter words are excluded on purpose
+# (English "I" / "a" and Italian "e"/"o"/"i" are too ambiguous to de-capitalize).
+_CONTINUATION_WORDS = {
+    # English: articles, conjunctions, prepositions, relatives/connectors
+    "the", "an", "and", "but", "or", "nor", "so", "yet", "because", "although",
+    "though", "while", "if", "unless", "since", "whether", "as", "with", "without",
+    "of", "to", "for", "from", "in", "into", "on", "onto", "at", "by", "about",
+    "over", "under", "after", "before", "between", "through", "during", "against",
+    "than", "that", "which", "who", "whom", "whose", "where", "when", "then", "plus",
+    # Italian counterparts (single-letter ones omitted)
+    "il", "lo", "la", "gli", "le", "un", "una", "uno", "ed", "ma", "perche", "che",
+    "con", "senza", "di", "da", "per", "tra", "fra", "su", "del", "della", "dei",
+    "delle", "quando", "dove", "come", "mentre",
+}
+
 _NUM_ONES = {
     "zero": 0, "oh": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
@@ -414,6 +432,7 @@ def interpret(transcript: str, modes: dict | None = None,
     actions: list[tuple[str, str]] = []
     buf: list[tuple[str, bool]] = []  # (text, glue_before)
     next_glue = False
+    need_sep = False  # prepend a space before this utterance's first word (set below)
     case_mode = modes.get("case_mode", "none")  # persists across utterances
     cap_once = False
     literal_once = False
@@ -442,6 +461,7 @@ def interpret(transcript: str, modes: dict | None = None,
     # set later if THIS utterance turns out to be a lone "command".
     armed_prefix = False
     armed_baseline = 0
+    retro_fired = False
     armed_erase = int(modes.pop("armed_prefix_erase", 0))   # read + clear (one-shot)
     if prefix_mode and armed_erase and _prefix_would_act(tokens):
         if line and armed_erase <= len(line):
@@ -451,13 +471,38 @@ def interpret(transcript: str, modes: dict | None = None,
             line = line[: len(line) - armed_erase]
         tokens = ["command"] + tokens          # re-arm as if "command" preceded this utterance
         n = len(tokens)
+        retro_fired = True
+
+    # ── continuation merge (natural dictation across a thinking pause) ────────
+    # When this utterance continues a non-submitted line, the previous fragment
+    # often carries pause-punctuation Whisper guessed (. ? ! ,) and this one opens
+    # capitalized as if a new sentence. If it opens with a CONTINUATION word
+    # (the/with/and/that/…) we treat the pause as mid-thought: strip that dangling
+    # punctuation and lowercase the opener so the fragments flow as one sentence.
+    # The separating space itself is added by flush() for EVERY continuation.
+    if line and tokens and not retro_fired and _norm(tokens[0]) in _CONTINUATION_WORDS \
+            and line[-1:] in (".", "?", "!", ","):
+        actions.append(("erase", "1"))
+        undo.append(line)
+        redo.clear()
+        line = line[:-1]
+        w0 = tokens[0]
+        tokens = [w0[:1].lower() + w0[1:], *tokens[1:]]
+    # Separate this utterance from a non-submitted previous line with a space.
+    need_sep = bool(line) and not line.endswith(" ")
 
     def flush():
-        nonlocal buf, line
+        nonlocal buf, line, need_sep
         if buf:
+            first_glue = buf[0][1]
             s = buf[0][0]
             for piece, glue in buf[1:]:
                 s += ("" if glue else " ") + piece
+            # Separate from the previous (non-submitted) line with a space — but not
+            # before hugging punctuation (a leading "," / ")" stays glued).
+            if need_sep and not first_glue and s and not s[0].isspace():
+                s = " " + s
+            need_sep = False
             actions.append(("type", s))
             undo.append(line)
             redo.clear()
