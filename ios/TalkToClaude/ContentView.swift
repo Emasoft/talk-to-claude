@@ -224,6 +224,9 @@ struct ContentView: View {
                 if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
                 if voice.capsMode == "lower" { modeBadge("abc", .blue) }
                 if voice.spellMode { modeBadge("SPELL", .purple) }
+                if !voice.editMode.isEmpty {
+                    modeBadge(voice.editMode == "delete" ? "DELETE" : "REPLACE", .red)
+                }
                 Spacer(minLength: 6)
                 if !voice.lastError.isEmpty {
                     Text(voice.lastError)

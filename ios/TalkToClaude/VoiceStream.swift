@@ -15,6 +15,7 @@ final class VoiceStream: ObservableObject {
     @Published var cheatGroups: [CheatGroup] = []
     @Published var spellMode = false
     @Published var capsMode = "none"  // "none" | "upper" | "lower"
+    @Published var editMode = ""      // "" | "delete" | "replace_find" | "replace_with"
 
     private let settings: AppSettings
     private let urlSession = URLSession(configuration: .default)
@@ -52,8 +53,13 @@ final class VoiceStream: ObservableObject {
         status = "Connecting…"
         t.resume()
 
-        // First frame: the JSON config with token + target tmux session.
-        let cfg: [String: Any] = ["token": settings.token, "session": session]
+        // First frame: the JSON config — token + target session + voice tunables.
+        let cfg: [String: Any] = [
+            "token": settings.token,
+            "session": session,
+            "silence_hold": settings.pauseThreshold,  // pause (s) that ends a sentence
+            "auto_send": settings.autoSend,            // submit each sentence automatically
+        ]
         if let data = try? JSONSerialization.data(withJSONObject: cfg),
            let json = String(data: data, encoding: .utf8) {
             t.send(.string(json)) { [weak self] error in
@@ -72,6 +78,7 @@ final class VoiceStream: ObservableObject {
         status = "Stopped"
         spellMode = false
         capsMode = "none"
+        editMode = ""
         liveTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -122,6 +129,12 @@ final class VoiceStream: ObservableObject {
                 finals.insert(line, at: 0)
                 if finals.count > 50 { finals.removeLast() }
             }
+            // Surface tmux-injection failures: the words were heard but never
+            // reached Claude (e.g. the target session was killed).
+            if let injected = obj["injected"] as? Bool {
+                lastError = injected ? ""
+                    : "Not delivered: \((obj["error"] as? String) ?? "tmux session unreachable")"
+            }
         case "error":
             lastError = (obj["error"] as? String) ?? "server error"
         case "cheatsheet":
@@ -134,6 +147,7 @@ final class VoiceStream: ObservableObject {
         case "mode":
             spellMode = (obj["spell"] as? Bool) ?? false
             capsMode = (obj["caps"] as? String) ?? "none"
+            editMode = (obj["edit"] as? String) ?? ""
         default:
             break
         }

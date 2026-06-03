@@ -1,6 +1,6 @@
 """Tests for the bilingual verbal-command interpreter. Run: python server/test_voice_commands.py"""
 
-from voice_commands import interpret, render
+from voice_commands import interpret, looks_like_hallucination, render
 
 # (description, spoken transcript, expected rendered output)
 CASES = [
@@ -85,6 +85,22 @@ def main() -> int:
     )
     print(f"persistent modes across utterances: {'PASS' if persist else 'FAIL'}")
     if not persist:
+        failed += 1
+
+    # Whisper hallucination filter: canned phrases / punctuation / music -> dropped;
+    # real words (even single ones) -> kept.
+    hall = (
+        looks_like_hallucination("Thanks for watching")
+        and looks_like_hallucination("thank you.")
+        and looks_like_hallucination("   ")
+        and looks_like_hallucination("♪♪♪")
+        and looks_like_hallucination("grazie mille")
+        and not looks_like_hallucination("hello world")
+        and not looks_like_hallucination("you")
+        and not looks_like_hallucination("git status")
+    )
+    print(f"hallucination filter: {'PASS' if hall else 'FAIL'}")
+    if not hall:
         failed += 1
 
     print(f"{total - failed}/{total} passed." + (" All green." if failed == 0 else f" {failed} FAILED."))

@@ -2,9 +2,9 @@ import Foundation
 import Combine
 
 /// Default shared secret, generated at project-creation time. It is baked into
-/// BOTH this app and `server/claude_voice_server.py` so the pair works with zero
-/// configuration on first run. Change it in Settings (and pass the same value to
-/// the server via CLAUDE_VOICE_TOKEN / --token) if you want a different secret.
+/// BOTH this app and `server/voice_server.py` so the pair works with zero
+/// configuration on first run. CHANGE IT in Settings (and pass the same value to
+/// the server via CLAUDE_VOICE_TOKEN / --token) — the committed default is public.
 let kDefaultToken = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
 
 /// Default Tailscale IPv4 of the Mac running the receiver. Editable in Settings.
@@ -22,9 +22,10 @@ final class AppSettings: ObservableObject {
     @Published var port: String { didSet { store.set(port, forKey: "port") } }
     @Published var token: String { didSet { store.set(token, forKey: "token") } }
     @Published var session: String { didSet { store.set(session, forKey: "session") } }
+    /// Pause (seconds) of silence that ends a sentence — sent to the server's VAD.
     @Published var pauseThreshold: Double { didSet { store.set(pauseThreshold, forKey: "pauseThreshold") } }
+    /// Submit each sentence automatically (vs. saying "invio" to send).
     @Published var autoSend: Bool { didSet { store.set(autoSend, forKey: "autoSend") } }
-    @Published var showReplies: Bool { didSet { store.set(showReplies, forKey: "showReplies") } }
 
     init() {
         // didSet does not fire for assignments made inside init, so these reads
@@ -33,9 +34,8 @@ final class AppSettings: ObservableObject {
         port = store.string(forKey: "port") ?? "8765"
         token = store.string(forKey: "token") ?? kDefaultToken
         session = store.string(forKey: "session") ?? "default"
-        pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 1.2
-        autoSend = store.object(forKey: "autoSend") as? Bool ?? true
-        showReplies = store.object(forKey: "showReplies") as? Bool ?? true
+        pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
+        autoSend = store.object(forKey: "autoSend") as? Bool ?? false
     }
 
     /// Port parsed to an Int, falling back to the default if the field is junk.

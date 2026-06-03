@@ -4,14 +4,14 @@ Talk to Claude — v2 streaming voice server.
 
 The iOS app streams raw microphone audio (PCM16, 16 kHz, mono) over a WebSocket.
 This server segments utterances with an energy-based VAD, transcribes each
-COMPLETED utterance with Qwen3-ASR-0.6B (MLX) in BATCH mode, and injects the
-recognized text into a running `claude` CLI session inside tmux.
+COMPLETED utterance with Whisper-large-v3-turbo (MLX) in BATCH mode, and injects
+the recognized text into a running `claude` CLI session inside tmux.
 
 Why batch-per-utterance instead of chunk streaming:
-    Measured on an M4 Pro, Qwen3-ASR chunk-streaming (1 s chunks) badly degraded
+    Measured on an M4 Pro, ASR chunk-streaming (1 s chunks) badly degraded
     accuracy ("Hello Claude ..." -> "Hello, clouds. Please list. ..."), while a
-    full BATCH transcribe of the whole utterance was flawless at RTF ~0.15
-    (~0.7 s for a 5 s utterance). So we let an energy VAD find utterance
+    full BATCH transcribe of the whole utterance was flawless at RTF ~0.16
+    (~0.8 s for a 5 s utterance). So we let an energy VAD find utterance
     boundaries (continuous, no push-to-talk) and run one accurate batch
     transcription per utterance. Text lands in Claude ~1-1.5 s after you stop
     speaking.
@@ -53,7 +53,7 @@ import numpy as np
 import mlx_whisper
 from aiohttp import WSMsgType, web
 
-from voice_commands import cheatsheet, interpret, render
+from voice_commands import cheatsheet, interpret, looks_like_hallucination, render
 
 # Baked default — identical to kDefaultToken in the iOS app. Override with
 # CLAUDE_VOICE_TOKEN or --token.
@@ -72,6 +72,7 @@ DEFAULT_CONTEXT = ""
 # Populated in main().
 TOKEN = DEFAULT_TOKEN
 TMUX = "tmux"
+MODEL = MODEL_ID  # the model actually used for transcription (set from --model)
 # All MLX work runs on ONE dedicated thread (max_workers=1): the model is loaded
 # there and every transcription runs there, so MLX's per-thread Metal stream
 # stays consistent. Calling MLX from an arbitrary pooled thread raises
@@ -215,7 +216,7 @@ class UtteranceSegmenter:
         windows = data[:n_full].reshape(-1, self.win) if n_full else np.empty((0, self.win), np.float32)
         self._leftover = data[n_full:].copy()
 
-        for w in windows:
+        for idx, w in enumerate(windows):
             rms = float(np.sqrt(np.mean(w * w)) + 1e-12)
             self.level = rms
             is_speech = rms > self.threshold
@@ -245,7 +246,11 @@ class UtteranceSegmenter:
                     if self._speech_win >= self.min_speech_win:
                         finished = np.concatenate(self._utt).astype(np.float32)
                     self._reset()
-                    # one utterance per feed() call is fine; bytes arrive fast
+                    # Keep any audio AFTER this boundary (the start of the next
+                    # utterance) instead of dropping it — one utterance per feed().
+                    rest = windows[idx + 1:]
+                    if rest.size:
+                        self._leftover = np.concatenate([rest.reshape(-1), self._leftover])
                     break
         return events, finished
 
@@ -266,12 +271,26 @@ def _load_model(model_id: str):
 
 def transcribe_utterance(audio: np.ndarray, context: str) -> str:
     """Batch-transcribe one utterance with Whisper. Runs on the ASR thread.
-    Language is auto-detected per utterance (English / Italian / …)."""
-    opts = {"path_or_hf_repo": MODEL_ID}
+    Language is auto-detected per utterance (English / Italian / …). Returns ""
+    for silence/noise hallucinations so nothing phantom is injected."""
+    opts = {"path_or_hf_repo": MODEL}
     if context:
         opts["initial_prompt"] = context
     result = mlx_whisper.transcribe(audio, **opts)
-    return (result.get("text", "") or "").strip()
+    text = (result.get("text", "") or "").strip()
+    # Drop hallucinations: if EVERY segment reads as non-speech (high
+    # no_speech_prob) or very low confidence, treat the whole utterance as silence.
+    segs = result.get("segments") or []
+    if segs:
+        speechy = [
+            s for s in segs
+            if s.get("no_speech_prob", 0.0) < 0.6 and s.get("avg_logprob", -10.0) > -1.0
+        ]
+        if not speechy:
+            return ""
+    if looks_like_hallucination(text):
+        return ""
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +353,32 @@ async def handle_say(request):
 # --------------------------------------------------------------------------- #
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
+_LINE_KEYS = ("line", "undo", "redo", "edit_mode", "edit_target", "edit_repl",
+              "case_mode", "spelling")
+
+
+def _snapshot_modes(m: dict) -> dict:
+    """Deep-ish snapshot of the per-connection mode state (lists copied) so an
+    edit can be rolled back if tmux injection fails."""
+    return {k: (list(m[k]) if isinstance(m.get(k), list) else m.get(k)) for k in _LINE_KEYS}
+
+
+def _restore_modes(m: dict, snap: dict):
+    for k in _LINE_KEYS:
+        if k in snap:
+            m[k] = list(snap[k]) if isinstance(snap[k], list) else snap[k]
+
+
+def _reset_line(m: dict):
+    """Forget the editable line — used after Enter / auto-send commits a sentence."""
+    m["line"] = ""
+    m["undo"] = []
+    m["redo"] = []
+    m["edit_mode"] = None
+    m["edit_target"] = []
+    m["edit_repl"] = []
+
+
 async def handle_stream(request):
     ws = web.WebSocketResponse(max_msg_size=8 * 1024 * 1024, heartbeat=30)
     await ws.prepare(request)
@@ -368,16 +413,36 @@ async def handle_stream(request):
 
     context = str(cfg.get("context") or DEFAULT_CONTEXT)
     sample_rate = int(cfg.get("sample_rate") or SAMPLE_RATE)
-    seg = UtteranceSegmenter(sample_rate=sample_rate)
-    modes: dict = {}  # persistent caps/spell state for this connection
+    if sample_rate != SAMPLE_RATE:
+        # Whisper assumes 16 kHz and we don't resample; the app always sends 16 kHz.
+        await ws.send_json({"type": "error", "error": f"sample_rate must be {SAMPLE_RATE}"})
+        await ws.close()
+        return ws
+    # Optional tunables from the app: silence_hold = pause length that ends an
+    # utterance (the app's "pause threshold"); auto_send submits each utterance.
+    try:
+        silence_hold = float(cfg.get("silence_hold") or 0.7)
+    except (TypeError, ValueError):
+        silence_hold = 0.7
+    silence_hold = max(0.3, min(silence_hold, 3.0))
+    auto_send = bool(cfg.get("auto_send"))
+
+    seg = UtteranceSegmenter(sample_rate=sample_rate, silence_hold_sec=silence_hold)
+    modes: dict = {}  # persistent caps/spell + editable-line state for this connection
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
-    print(f"[stream] connected -> session={session!r} sr={sample_rate}", file=sys.stderr)
+    print(f"[stream] connected -> session={session!r} sr={sample_rate} "
+          f"hold={silence_hold}s auto_send={auto_send}", file=sys.stderr)
 
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
-                pcm = np.frombuffer(msg.data, dtype="<i2").astype(np.float32) / 32768.0
+                raw = msg.data
+                if len(raw) % 2:                 # PCM16 — an odd byte count is a torn frame
+                    raw = raw[: len(raw) - 1]
+                if not raw:
+                    continue
+                pcm = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
                 if pcm.size == 0:
                     continue
                 events, utt = seg.feed(pcm)
@@ -392,20 +457,25 @@ async def handle_stream(request):
                         await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
                         continue
                     if text:
-                        prev_modes = dict(modes)
+                        before = _snapshot_modes(modes)   # for change-detect + rollback
                         actions = interpret(text, modes)
+                        if auto_send and not (actions and actions[-1] == ("key", "Enter")):
+                            actions = actions + [("key", "Enter")]
+                            _reset_line(modes)            # auto-submitted -> no longer editable
                         ok, err = execute_actions(session, actions)
+                        if not ok:
+                            _restore_modes(modes, before)  # C7: revert the optimistic edit
                         await ws.send_json(
                             {"type": "final", "text": text, "rendered": render(actions), "injected": ok}
                             | ({} if ok else {"error": err})
                         )
-                        if modes != prev_modes:
-                            await ws.send_json({
-                                "type": "mode",
-                                "spell": bool(modes.get("spelling")),
-                                "caps": modes.get("case_mode", "none"),
-                            })
-                        print(f"[stream] -> {session}: {text!r} => {render(actions)!r}", file=sys.stderr)
+                        now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
+                               modes.get("edit_mode"))
+                        if now != (bool(before["spelling"]), before["case_mode"], before["edit_mode"]):
+                            await ws.send_json({"type": "mode", "spell": now[0],
+                                                "caps": now[1], "edit": now[2]})
+                        print(f"[stream] -> {session}: {text!r} => {render(actions)!r} ok={ok}",
+                              file=sys.stderr)
                     else:
                         await ws.send_json({"type": "final", "text": ""})
             elif msg.type == WSMsgType.TEXT:
@@ -447,7 +517,7 @@ def make_app() -> web.Application:
 
 
 def main():
-    global TOKEN, TMUX
+    global TOKEN, TMUX, MODEL
 
     parser = argparse.ArgumentParser(description="Talk to Claude v2 voice server")
     parser.add_argument("--host", default=None, help="Bind address (default: Tailscale IP)")
@@ -459,11 +529,14 @@ def main():
 
     TOKEN = args.token
     TMUX = args.tmux
+    MODEL = args.model  # the model actually used for transcription (A1)
 
     host = args.host or detect_tailscale_ip()
-    insecure_bind = host is None
-    if insecure_bind:
-        host = "0.0.0.0"
+    no_tailscale = host is None
+    if no_tailscale:
+        # No Tailscale IP and no explicit --host: bind LOOPBACK only — never the
+        # LAN/world with just the shared token. Pass --host <ip> to expose it.
+        host = "127.0.0.1"
 
     print(f"Loading Whisper model {args.model} (one-time)…", file=sys.stderr)
     t0 = time.time()
@@ -479,14 +552,15 @@ def main():
     print(f"   Model        : {args.model}")
     sessions = list_sessions()
     print(f"   tmux sessions: {', '.join(sessions) if sessions else '(none found)'}")
-    if insecure_bind:
-        print("   ⚠️  No Tailscale IP detected — bound to 0.0.0.0. Pass --host <ip>.")
+    if no_tailscale:
+        print("   ⚠️  No Tailscale IP detected — bound to 127.0.0.1 (loopback only).")
+        print("       Pass --host <ip> to expose it on a trusted network.")
     print("─" * 64)
 
     # access_log=None disables aiohttp's per-request logging. Without it, the
-    # app's /pane poll (every ~1.5 s) would append a log line forever and grow
-    # the log file unbounded on a long-running server. Our own meaningful events
-    # (connect/disconnect/utterances) are still printed to stderr.
+    # /pane poll would append a log line forever and grow the log file unbounded
+    # on a long-running server. Our own meaningful events (connect/disconnect/
+    # utterances) are still printed to stderr.
     web.run_app(make_app(), host=host, port=args.port, print=None, access_log=None)
 
 

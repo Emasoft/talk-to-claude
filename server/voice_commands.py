@@ -536,6 +536,29 @@ def render(actions: list[tuple[str, str]]) -> str:
     return "".join(out)
 
 
+# Canned phrases Whisper emits on silence/noise (YouTube-style). The server's
+# no_speech_prob gate catches most silence; this is the belt-and-braces text
+# filter for the ones that slip through. Single common words are NOT listed (so
+# a legitimate one-word utterance isn't dropped).
+_HALLUCINATIONS = {
+    "thank you", "thank you very much", "thanks for watching",
+    "thank you for watching", "please subscribe", "like and subscribe",
+    "subscribe to my channel", "see you next time", "see you in the next video",
+    "grazie", "grazie mille", "grazie per la visione", "iscriviti al canale",
+}
+
+
+def looks_like_hallucination(text: str) -> bool:
+    """True if `text` looks like a Whisper silence/noise hallucination — empty,
+    pure punctuation/music, or one of the canned phrases."""
+    t = text.strip().lower().strip(" .,!?-—…\"'♪~")
+    if not t:
+        return True
+    if all(not c.isalnum() for c in t):  # punctuation / music notes only
+        return True
+    return t in _HALLUCINATIONS
+
+
 _KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "Escape": "esc", "BSpace": "⌫", "Newline": "⇧⏎"}
 
 

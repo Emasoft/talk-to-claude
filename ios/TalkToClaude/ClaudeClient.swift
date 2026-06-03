@@ -1,15 +1,15 @@
 import Foundation
 import Combine
 
-/// Talks to the Mac-side receiver (`server/claude_voice_server.py`) over the
-/// Tailscale network. The wire is plain HTTP — Tailscale (WireGuard) already
-/// encrypts every packet end-to-end, and the bearer token authorizes the call.
+/// Settings-only HTTP client for the Mac receiver (`server/voice_server.py`):
+/// the "Test connection" probe and the tmux-session list. The voice path itself
+/// is the WebSocket in `VoiceStream`. Plain HTTP — Tailscale (WireGuard) encrypts
+/// every packet, and the bearer token authorizes the call.
 @MainActor
 final class ClaudeClient: ObservableObject {
     @Published var connected: Bool = false
     @Published var lastError: String = ""
     @Published var sessions: [String] = []
-    @Published var pane: String = ""
 
     private let settings: AppSettings
 
@@ -42,27 +42,6 @@ final class ClaudeClient: ObservableObject {
         }
     }
 
-    /// Deliver one finished utterance to the target tmux session.
-    func send(_ text: String, session: String) async {
-        guard var req = makeRequest(path: "/say", method: "POST") else { return }
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: String] = ["session": session, "text": text]
-        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
-            if code == 200 {
-                connected = true
-                lastError = ""
-            } else {
-                lastError = "Send failed (HTTP \(code))"
-            }
-        } catch {
-            connected = false
-            lastError = "Send failed — \(error.localizedDescription)"
-        }
-    }
-
     /// Refresh the list of available tmux sessions for the Settings picker.
     func loadSessions() async {
         guard let req = makeRequest(path: "/sessions") else { return }
@@ -81,26 +60,8 @@ final class ClaudeClient: ObservableObject {
         }
     }
 
-    /// Pull the tail of the target tmux pane so the app can show Claude's output.
-    func loadPane(session: String, lines: Int = 60) async {
-        let encoded = session.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? session
-        guard let req = makeRequest(path: "/pane?session=\(encoded)&lines=\(lines)") else { return }
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return }
-            let decoded = try JSONDecoder().decode(PaneResponse.self, from: data)
-            pane = decoded.pane
-            connected = true
-        } catch {
-            // Pane polling is best-effort; don't spam the error banner.
-        }
-    }
 }
 
 private struct SessionsResponse: Decodable {
     let sessions: [String]
-}
-
-private struct PaneResponse: Decodable {
-    let pane: String
 }

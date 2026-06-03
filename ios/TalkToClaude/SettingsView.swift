@@ -65,8 +65,16 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Display") {
-                    Toggle("Show Claude's output", isOn: $settings.showReplies)
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Pause to end a sentence: \(settings.pauseThreshold, specifier: "%.1f") s")
+                        Slider(value: $settings.pauseThreshold, in: 0.4...2.0, step: 0.1)
+                    }
+                    Toggle("Auto-send each sentence", isOn: $settings.autoSend)
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("Changes apply the next time you tap the mic.")
                 }
 
                 Section {

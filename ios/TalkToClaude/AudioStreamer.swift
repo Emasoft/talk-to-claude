@@ -3,10 +3,10 @@ import AVFoundation
 
 /// Captures microphone audio continuously and emits 16 kHz mono **PCM16** frames.
 ///
-/// Unlike v1, there is NO on-device recognition here — raw audio is streamed to
-/// the Mac, which runs VAD + Whisper. Capture keeps running when the app is
-/// backgrounded because of the `audio` UIBackgroundMode + an active `.record`
-/// session; `.mixWithOthers` lets you keep using audio in other apps.
+/// There is NO on-device recognition here — raw audio is streamed to the Mac,
+/// which runs VAD + Whisper. This runs FOREGROUND-ONLY (the caller stops it on
+/// `scenePhase == .background`), and uses `.playAndRecord` + `.duckOthers` so
+/// other apps' audio is lowered while recording and fully restored on stop.
 final class AudioStreamer {
     /// Called (on the audio thread) with little-endian PCM16 bytes at 16 kHz mono.
     var onPCM: ((Data) -> Void)?
@@ -38,7 +38,13 @@ final class AudioStreamer {
             let input = engine.inputNode
             try? input.setVoiceProcessingEnabled(true)  // belt-and-braces AEC/NS
             let hwFormat = input.outputFormat(forBus: 0)
-            converter = AVAudioConverter(from: hwFormat, to: targetFormat)
+            guard let conv = AVAudioConverter(from: hwFormat, to: targetFormat) else {
+                throw NSError(domain: "AudioStreamer", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Can't convert \(Int(hwFormat.sampleRate)) Hz mic input to 16 kHz",
+                ])
+            }
+            converter = conv
             input.removeTap(onBus: 0)
             input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
                 self?.process(buffer)
