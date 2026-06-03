@@ -193,22 +193,32 @@ struct ContentView: View {
         return leaf.isEmpty ? trimmed : leaf
     }
 
-    /// Make `s` the dictation target. If we're already streaming, reconnect so the
-    /// new target takes effect immediately (the target is sent only at connect time).
+    /// Make `s` the dictation target + focus its tab on the Mac. Switching to a
+    /// DIFFERENT Claude while the mic is live CLOSES the connection to the old one —
+    /// a clean handoff. You tap the mic again to start talking to the new target, so
+    /// a half-spoken sentence can never land in the wrong session.
     private func selectSession(_ s: ClaudeSession) {
         tapFeedback()
+        let changed = settings.session != s.target
         settings.session = s.target
         Task { await claude.focusSession(s.target) }   // bring its tab to the front on the Mac
-        guard voice.listening else { return }
-        voice.stop()
-        audio.stop()
-        audio.onPCM = { [weak voice] data in voice?.sendPCM(data) }
-        do {
-            try audio.start()
-            voice.start(session: settings.session)
-        } catch {
-            voice.lastError = "Mic restart failed: \(error.localizedDescription)"
+        if changed && voice.listening {
+            audio.stop()
+            voice.stop()
+            UIApplication.shared.isIdleTimerDisabled = false
         }
+    }
+
+    /// The session object for the current target (nil if the chosen Claude isn't in
+    /// the live list — e.g. it exited). Drives the "talking to" indicator.
+    private var selectedSession: ClaudeSession? {
+        claude.sessions.first { $0.target == settings.session }
+    }
+
+    /// The tab name to display: the terminal tab title, falling back to the folder.
+    private func tabName(_ s: ClaudeSession) -> String {
+        let t = (s.title ?? "").trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? s.label : t
     }
 
     // MARK: - Cheat sheet (variable-width chips that wrap; START/STOP modes paired)
@@ -374,6 +384,36 @@ struct ContentView: View {
 
     private func bottomBar(transcriptLines: Int) -> some View {
         VStack(alignment: .leading, spacing: 5) {
+            // Row 0 — which Claude you're talking to: tab name + work dir (always
+            // visible, even with the sidebar collapsed, so you know to switch if needed).
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: selectedSession != nil ? "target" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(selectedSession != nil ? Color.green : .orange)
+                    .padding(.top, 1)
+                if let sel = selectedSession {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 5) {
+                            Text(tabName(sel)).font(.subheadline.weight(.heavy))
+                                .foregroundStyle(.white).lineLimit(1)
+                            Text(sel.kind == "iterm" ? "iTerm" : (sel.kind == "terminal" ? "Term" : "tmux"))
+                                .font(.system(size: 8, weight: .bold)).foregroundStyle(.white.opacity(0.6))
+                                .padding(.horizontal, 3).padding(.vertical, 1)
+                                .background(.white.opacity(0.12), in: Capsule())
+                        }
+                        // Work dir — full path, head-truncated so the project folder stays visible.
+                        Text(sel.cwd.isEmpty ? sel.label : sel.cwd)
+                            .font(.caption2).foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1).truncationMode(.head)
+                    }
+                } else {
+                    Text(settings.session.isEmpty
+                         ? "No Claude selected — tap one in the list"
+                         : "Selected Claude isn’t running — pick another")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.orange).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
             // Row 1 — big status labels + (bold red) errors, full width so they never wrap.
             HStack(spacing: 9) {
                 statusLabel(voice.connected ? "CONNECTED" : "OFFLINE",
