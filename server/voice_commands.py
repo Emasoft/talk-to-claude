@@ -429,13 +429,80 @@ def _rule_out(r: dict) -> str:
     return str(r.get("label", ""))
 
 
+# Italian display phrase per command, keyed by the English say (triggers[0]). Used
+# only for the app's IT/EN chip toggle — all of these are also live voice triggers.
+# Commands absent here keep their English phrase in Italian mode too (tab, slash,
+# backslash, backtick, escape — Italians say those in English).
+IT_SAY = {
+    "enter": "invio",
+    "new line": "a capo",
+    "backspace": "cancella",
+    "dot": "punto",
+    "comma": "virgola",
+    "dash": "trattino",
+    "underscore": "trattino basso",
+    "no space": "senza spazio",
+    "at sign": "chiocciola",
+    "hash": "cancelletto",
+    "dollar": "dollaro",
+    "percent": "percento",
+    "caret": "accento circonflesso",
+    "ampersand": "e commerciale",
+    "star": "asterisco",
+    "pipe": "barra verticale",
+    "plus": "più",
+    "equals": "uguale",
+    "colon": "due punti",
+    "semicolon": "punto e virgola",
+    "question mark": "punto interrogativo",
+    "bang": "punto esclamativo",
+    "less than": "minore",
+    "greater than": "maggiore",
+    "open quotes": "virgolette aperte",
+    "close quotes": "virgolette chiuse",
+    "apostrophe": "apostrofo",
+    "open code block": "blocco di codice",
+    "close code block": "chiudi blocco",
+    "open parentheses": "parentesi tonda aperta",
+    "close parentheses": "parentesi tonda chiusa",
+    "open square brackets": "parentesi quadra aperta",
+    "close square brackets": "parentesi quadra chiusa",
+    "open curly braces": "parentesi graffa aperta",
+    "close curly braces": "parentesi graffa chiusa",
+    "in parentheses": "tra parentesi",
+    "in square brackets": "tra parentesi quadre",
+    "in curly braces": "tra parentesi graffe",
+    "in quotes": "tra virgolette",
+    "in backticks": "tra backtick",
+    "start caps mode": "modo maiuscolo",
+    "stop caps mode": "modo normale",
+    "lowercase": "minuscolo",
+    "capital": "maiuscola",
+    "heading": "titolo",
+    "heading two": "sottotitolo",
+    "heading three": "sotto sottotitolo",
+    "bullet": "punto elenco",
+    "numbered item": "elenco numerato",
+    "quote block": "citazione",
+    "bold": "grassetto",
+    "italic": "corsivo",
+    "strikethrough": "barrato",
+    "horizontal rule": "linea orizzontale",
+    "literal": "letterale",
+    "start spell mode": "compitazione",
+    "stop spell mode": "fine compitazione",
+}
+
+
 def cheatsheet() -> list[dict]:
-    """Grouped rules for the app: [{group, items:[{say, out, label, triggers}]}]."""
+    """Grouped rules for the app: [{group, items:[{say, say_it, out, label, triggers}]}]."""
     groups: dict[str, list[dict]] = {}
     for r in RULES:
+        say = r["triggers"][0]
         groups.setdefault(r["group"], []).append(
             {
-                "say": r["triggers"][0],
+                "say": say,
+                "say_it": IT_SAY.get(say, say),  # Italian phrase, English fallback
                 "out": _rule_out(r),
                 "label": r["label"],
                 "triggers": r["triggers"],

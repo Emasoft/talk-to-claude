@@ -2,7 +2,8 @@ import SwiftUI
 
 struct CheatItem: Identifiable {
     let id = UUID()
-    let say: String        // the spoken phrase (yellow chip)
+    let say: String        // the spoken phrase, English (yellow chip)
+    let sayIt: String      // the spoken phrase, Italian (EN/IT toggle)
     let out: String        // the literal output it types (blue chip)
     let label: String
     let triggers: [String]
@@ -24,9 +25,10 @@ struct CheatGroup: Identifiable {
             let triggers = it["triggers"] as? [String] ?? []
             let label = it["label"] as? String ?? ""
             let say = it["say"] as? String ?? triggers.first ?? label
+            let sayIt = it["say_it"] as? String ?? say
             let out = it["out"] as? String ?? label
             guard !say.isEmpty else { return nil }
-            return CheatItem(say: say, out: out, label: label, triggers: triggers,
+            return CheatItem(say: say, sayIt: sayIt, out: out, label: label, triggers: triggers,
                              pair: it["pair"] as? String, role: it["role"] as? String)
         }
         return CheatGroup(group: group, items: items)

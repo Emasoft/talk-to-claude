@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var audio = AudioStreamer()
     @State private var showSettings = false
     @State private var showSearch = false
+    @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var hSize
 
@@ -78,8 +79,10 @@ struct ContentView: View {
             let all = voice.cheatGroups.flatMap { $0.items }
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
-            let font: CGFloat = big ? 19 : 12
-            let pairW: CGFloat = big ? 320 : 178
+            // Italian phrases run longer, so shrink the iPhone font a touch to keep
+            // everything (including the mode pairs) on one screen.
+            let font: CGFloat = big ? 19 : (italian ? 10.5 : 12)
+            let pairW: CGFloat = big ? 320 : (italian ? 196 : 178)
             ScrollView {
                 if all.isEmpty {
                     Text("Tap the mic once to load the command list.")
@@ -120,7 +123,7 @@ struct ContentView: View {
     /// diagonal slant, wrapped in glass chrome (frosted material + lit edge + shadow).
     private func singleCell(_ item: CheatItem, fontSize: CGFloat) -> some View {
         glassChrome(
-            slantBicolor(say: item.say, out: item.out, outColor: Self.chipOut,
+            slantBicolor(say: italian ? item.sayIt : item.say, out: item.out, outColor: Self.chipOut,
                          fontSize: fontSize, sayFills: false)
         )
         .fixedSize()
@@ -131,9 +134,9 @@ struct ContentView: View {
     private func pairCell(_ p: ModePair, fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
             VStack(spacing: 1) {
-                slantBicolor(say: p.start.say.uppercased(), out: p.start.out,
+                slantBicolor(say: (italian ? p.start.sayIt : p.start.say).uppercased(), out: p.start.out,
                              outColor: Self.chipOut, fontSize: fontSize, sayFills: true)
-                slantBicolor(say: p.stop.say.uppercased(), out: p.stop.out,
+                slantBicolor(say: (italian ? p.stop.sayIt : p.stop.say).uppercased(), out: p.stop.out,
                              outColor: Self.chipStop, fontSize: fontSize, sayFills: true)
             }
             .frame(width: width)
@@ -208,6 +211,13 @@ struct ContentView: View {
                 transcriptView(lines: transcriptLines)
             }
             Spacer(minLength: 4)
+            Button { italian.toggle() } label: {
+                Text(italian ? "IT" : "EN")
+                    .font(.caption.weight(.bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 0.6))
+            }
             Button { showSearch = true } label: { Image(systemName: "magnifyingglass") }
             Button { showSettings = true } label: { Image(systemName: "gearshape") }
                 .padding(.leading, 2)

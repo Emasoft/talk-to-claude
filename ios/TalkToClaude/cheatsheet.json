@@ -4,6 +4,7 @@
     "items": [
       {
         "say": "enter",
+        "say_it": "invio",
         "out": "⏎",
         "label": "send ⏎",
         "triggers": [
@@ -22,6 +23,7 @@
       },
       {
         "say": "new line",
+        "say_it": "a capo",
         "out": "⇧⏎",
         "label": "newline ⇧⏎",
         "triggers": [
@@ -41,6 +43,7 @@
       },
       {
         "say": "tab",
+        "say_it": "tab",
         "out": "⇥",
         "label": "tab",
         "triggers": [
@@ -52,6 +55,7 @@
       },
       {
         "say": "escape",
+        "say_it": "escape",
         "out": "esc",
         "label": "escape",
         "triggers": [
@@ -63,6 +67,7 @@
       },
       {
         "say": "backspace",
+        "say_it": "cancella",
         "out": "⌫",
         "label": "backspace",
         "triggers": [
@@ -81,6 +86,7 @@
     "items": [
       {
         "say": "slash",
+        "say_it": "slash",
         "out": "/",
         "label": "/",
         "triggers": [
@@ -92,6 +98,7 @@
       },
       {
         "say": "backslash",
+        "say_it": "backslash",
         "out": "\\",
         "label": "\\",
         "triggers": [
@@ -104,6 +111,7 @@
       },
       {
         "say": "tilde",
+        "say_it": "tilde",
         "out": "~",
         "label": "~",
         "triggers": [
@@ -114,6 +122,7 @@
       },
       {
         "say": "dot",
+        "say_it": "punto",
         "out": ".",
         "label": ".",
         "triggers": [
@@ -126,6 +135,7 @@
       },
       {
         "say": "comma",
+        "say_it": "virgola",
         "out": ",",
         "label": ",",
         "triggers": [
@@ -137,6 +147,7 @@
       },
       {
         "say": "dash",
+        "say_it": "trattino",
         "out": "-",
         "label": "-",
         "triggers": [
@@ -150,6 +161,7 @@
       },
       {
         "say": "underscore",
+        "say_it": "trattino basso",
         "out": "_",
         "label": "_",
         "triggers": [
@@ -162,6 +174,7 @@
       },
       {
         "say": "no space",
+        "say_it": "senza spazio",
         "out": "no␣",
         "label": "(glue)",
         "triggers": [
@@ -180,6 +193,7 @@
     "items": [
       {
         "say": "at sign",
+        "say_it": "chiocciola",
         "out": "@",
         "label": "@",
         "triggers": [
@@ -191,6 +205,7 @@
       },
       {
         "say": "hash",
+        "say_it": "cancelletto",
         "out": "#",
         "label": "#",
         "triggers": [
@@ -205,6 +220,7 @@
       },
       {
         "say": "dollar",
+        "say_it": "dollaro",
         "out": "$",
         "label": "$",
         "triggers": [
@@ -217,6 +233,7 @@
       },
       {
         "say": "percent",
+        "say_it": "percento",
         "out": "%",
         "label": "%",
         "triggers": [
@@ -229,6 +246,7 @@
       },
       {
         "say": "caret",
+        "say_it": "accento circonflesso",
         "out": "^",
         "label": "^",
         "triggers": [
@@ -241,6 +259,7 @@
       },
       {
         "say": "ampersand",
+        "say_it": "e commerciale",
         "out": "&",
         "label": "&",
         "triggers": [
@@ -253,6 +272,7 @@
       },
       {
         "say": "star",
+        "say_it": "asterisco",
         "out": "*",
         "label": "*",
         "triggers": [
@@ -265,6 +285,7 @@
       },
       {
         "say": "pipe",
+        "say_it": "barra verticale",
         "out": "|",
         "label": "|",
         "triggers": [
@@ -278,6 +299,7 @@
       },
       {
         "say": "plus",
+        "say_it": "più",
         "out": "+",
         "label": "+",
         "triggers": [
@@ -290,6 +312,7 @@
       },
       {
         "say": "equals",
+        "say_it": "uguale",
         "out": "=",
         "label": "=",
         "triggers": [
@@ -302,6 +325,7 @@
       },
       {
         "say": "colon",
+        "say_it": "due punti",
         "out": ":",
         "label": ":",
         "triggers": [
@@ -313,6 +337,7 @@
       },
       {
         "say": "semicolon",
+        "say_it": "punto e virgola",
         "out": ";",
         "label": ";",
         "triggers": [
@@ -324,6 +349,7 @@
       },
       {
         "say": "question mark",
+        "say_it": "punto interrogativo",
         "out": "?",
         "label": "?",
         "triggers": [
@@ -336,6 +362,7 @@
       },
       {
         "say": "bang",
+        "say_it": "punto esclamativo",
         "out": "!",
         "label": "!",
         "triggers": [
@@ -349,6 +376,7 @@
       },
       {
         "say": "less than",
+        "say_it": "minore",
         "out": "<",
         "label": "<",
         "triggers": [
@@ -361,6 +389,7 @@
       },
       {
         "say": "greater than",
+        "say_it": "maggiore",
         "out": ">",
         "label": ">",
         "triggers": [
@@ -378,6 +407,7 @@
     "items": [
       {
         "say": "backtick",
+        "say_it": "backtick",
         "out": "`",
         "label": "`",
         "triggers": [
@@ -391,6 +421,7 @@
       },
       {
         "say": "open quotes",
+        "say_it": "virgolette aperte",
         "out": "\"",
         "label": "\"",
         "triggers": [
@@ -404,6 +435,7 @@
       },
       {
         "say": "close quotes",
+        "say_it": "virgolette chiuse",
         "out": "\"",
         "label": "\"",
         "triggers": [
@@ -417,6 +449,7 @@
       },
       {
         "say": "apostrophe",
+        "say_it": "apostrofo",
         "out": "'",
         "label": "'",
         "triggers": [
@@ -430,6 +463,7 @@
       },
       {
         "say": "open code block",
+        "say_it": "blocco di codice",
         "out": "```",
         "label": "```",
         "triggers": [
@@ -446,6 +480,7 @@
       },
       {
         "say": "close code block",
+        "say_it": "chiudi blocco",
         "out": "```",
         "label": "``` (close)",
         "triggers": [
@@ -464,6 +499,7 @@
     "items": [
       {
         "say": "open parentheses",
+        "say_it": "parentesi tonda aperta",
         "out": "(",
         "label": "(",
         "triggers": [
@@ -478,6 +514,7 @@
       },
       {
         "say": "close parentheses",
+        "say_it": "parentesi tonda chiusa",
         "out": ")",
         "label": ")",
         "triggers": [
@@ -492,6 +529,7 @@
       },
       {
         "say": "open square brackets",
+        "say_it": "parentesi quadra aperta",
         "out": "[",
         "label": "[",
         "triggers": [
@@ -505,6 +543,7 @@
       },
       {
         "say": "close square brackets",
+        "say_it": "parentesi quadra chiusa",
         "out": "]",
         "label": "]",
         "triggers": [
@@ -518,6 +557,7 @@
       },
       {
         "say": "open curly braces",
+        "say_it": "parentesi graffa aperta",
         "out": "{",
         "label": "{",
         "triggers": [
@@ -531,6 +571,7 @@
       },
       {
         "say": "close curly braces",
+        "say_it": "parentesi graffa chiusa",
         "out": "}",
         "label": "}",
         "triggers": [
@@ -549,6 +590,7 @@
     "items": [
       {
         "say": "in parentheses",
+        "say_it": "tra parentesi",
         "out": "(…)",
         "label": "(…)",
         "triggers": [
@@ -561,6 +603,7 @@
       },
       {
         "say": "in square brackets",
+        "say_it": "tra parentesi quadre",
         "out": "[…]",
         "label": "[…]",
         "triggers": [
@@ -572,6 +615,7 @@
       },
       {
         "say": "in curly braces",
+        "say_it": "tra parentesi graffe",
         "out": "{…}",
         "label": "{…}",
         "triggers": [
@@ -583,6 +627,7 @@
       },
       {
         "say": "in quotes",
+        "say_it": "tra virgolette",
         "out": "\"…\"",
         "label": "\"…\"",
         "triggers": [
@@ -594,6 +639,7 @@
       },
       {
         "say": "in backticks",
+        "say_it": "tra backtick",
         "out": "`…`",
         "label": "`…`",
         "triggers": [
@@ -610,6 +656,7 @@
     "items": [
       {
         "say": "start caps mode",
+        "say_it": "modo maiuscolo",
         "out": "ABC",
         "label": "START CAPS MODE",
         "triggers": [
@@ -630,6 +677,7 @@
       },
       {
         "say": "stop caps mode",
+        "say_it": "modo normale",
         "out": "abc",
         "label": "STOP CAPS MODE",
         "triggers": [
@@ -645,6 +693,7 @@
       },
       {
         "say": "lowercase",
+        "say_it": "minuscolo",
         "out": "abc",
         "label": "lowercase",
         "triggers": [
@@ -659,6 +708,7 @@
       },
       {
         "say": "capital",
+        "say_it": "maiuscola",
         "out": "Aa",
         "label": "Capitalize next",
         "triggers": [
@@ -676,6 +726,7 @@
     "items": [
       {
         "say": "heading",
+        "say_it": "titolo",
         "out": "#",
         "label": "# heading",
         "triggers": [
@@ -689,6 +740,7 @@
       },
       {
         "say": "heading two",
+        "say_it": "sottotitolo",
         "out": "##",
         "label": "## heading",
         "triggers": [
@@ -702,6 +754,7 @@
       },
       {
         "say": "heading three",
+        "say_it": "sotto sottotitolo",
         "out": "###",
         "label": "### heading",
         "triggers": [
@@ -713,6 +766,7 @@
       },
       {
         "say": "bullet",
+        "say_it": "punto elenco",
         "out": "-",
         "label": "- bullet",
         "triggers": [
@@ -727,6 +781,7 @@
       },
       {
         "say": "numbered item",
+        "say_it": "elenco numerato",
         "out": "1.",
         "label": "1. numbered",
         "triggers": [
@@ -739,6 +794,7 @@
       },
       {
         "say": "quote block",
+        "say_it": "citazione",
         "out": ">",
         "label": "> quote",
         "triggers": [
@@ -752,6 +808,7 @@
       },
       {
         "say": "bold",
+        "say_it": "grassetto",
         "out": "**…**",
         "label": "**bold**",
         "triggers": [
@@ -763,6 +820,7 @@
       },
       {
         "say": "italic",
+        "say_it": "corsivo",
         "out": "*…*",
         "label": "*italic*",
         "triggers": [
@@ -774,6 +832,7 @@
       },
       {
         "say": "strikethrough",
+        "say_it": "barrato",
         "out": "~~…~~",
         "label": "~~strike~~",
         "triggers": [
@@ -785,6 +844,7 @@
       },
       {
         "say": "horizontal rule",
+        "say_it": "linea orizzontale",
         "out": "---",
         "label": "---",
         "triggers": [
@@ -802,6 +862,7 @@
     "items": [
       {
         "say": "literal",
+        "say_it": "letterale",
         "out": "as-is",
         "label": "literal next",
         "triggers": [
@@ -820,6 +881,7 @@
     "items": [
       {
         "say": "start spell mode",
+        "say_it": "compitazione",
         "out": "a·b·c",
         "label": "START SPELL MODE",
         "triggers": [
@@ -841,6 +903,7 @@
       },
       {
         "say": "stop spell mode",
+        "say_it": "fine compitazione",
         "out": "→ words",
         "label": "STOP SPELL MODE",
         "triggers": [
