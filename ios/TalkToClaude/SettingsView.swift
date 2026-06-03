@@ -75,11 +75,16 @@ struct SettingsView: View {
                     }
                     Toggle("Auto-send each sentence", isOn: $settings.autoSend)
                     Toggle("Require “command” prefix", isOn: $settings.prefixMode)
+                    NavigationLink {
+                        PrefixGrammarHelpView()
+                    } label: {
+                        Label("Command grammar", systemImage: "text.book.closed")
+                    }
                 } header: {
                     Text("Voice")
                 } footer: {
                     Text(settings.prefixMode
-                        ? "ON: everything you say is typed literally — a command fires only when you say “command” first (e.g. “command enter”, “command arrow up”). Say “command symbols … command words” to bracket a path/code burst. No more eaten words.\n\nChanges apply the next time you tap the mic."
+                        ? "ON: everything is typed literally — a command fires only when you say “command” first (e.g. “command enter”). Wrap many commands with “command start … command stop”, or a mode block like “command number start … number stop”. See Command grammar above.\n\nChanges apply the next time you tap the mic."
                         : "OFF (default): command words convert automatically (“slash” → /, “enter” → ⏎). Faster for symbols, but common words can get caught.\n\nChanges apply the next time you tap the mic.")
                 }
 
