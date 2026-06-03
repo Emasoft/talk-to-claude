@@ -123,6 +123,8 @@ KEY_MAP = {
     "Tab": ["Tab"],
     "Escape": ["Escape"],
     "BSpace": ["BSpace"],
+    "Up": ["Up"],      # navigate menus (AskUserQuestion) + prompt history
+    "Down": ["Down"],
     # "Newline" = a line break in Claude Code WITHOUT submitting. Claude's TUI
     # takes Option/Meta+Enter for that; change M-Enter here if your terminal differs.
     "Newline": ["M-Enter"],

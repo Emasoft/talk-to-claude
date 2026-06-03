@@ -78,6 +78,34 @@
         ],
         "pair": null,
         "role": null
+      },
+      {
+        "say": "arrow up",
+        "say_it": "freccia su",
+        "out": "↑",
+        "label": "↑",
+        "triggers": [
+          "arrow up",
+          "up arrow",
+          "freccia su",
+          "freccia in su"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "arrow down",
+        "say_it": "freccia giù",
+        "out": "↓",
+        "label": "↓",
+        "triggers": [
+          "arrow down",
+          "down arrow",
+          "freccia giù",
+          "freccia in giù"
+        ],
+        "pair": null,
+        "role": null
       }
     ]
   },

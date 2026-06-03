@@ -11,6 +11,8 @@ CASES = [
     ("shift-invio newline (hyphen)", "uno shift-invio due", "uno⟨Newline⟩due"),
     ("italian enter (invio)", "git status invio", "git status⟨Enter⟩"),
     ("english enter", "run the tests submit", "run the tests⟨Enter⟩"),
+    ("arrow keys (menu/history nav)", "arrow up arrow up arrow down", "⟨Up⟩⟨Up⟩⟨Down⟩"),
+    ("arrow up IT", "freccia su", "⟨Up⟩"),
     ("open/close parentheses", "open parentheses foo close parentheses", "(foo)"),
     ("all caps then stop", "all caps deploy now stop caps mode please", "DEPLOY NOW please"),
     ("verb-first caps mode", "start caps mode deploy stop caps mode ok", "DEPLOY ok"),

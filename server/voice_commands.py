@@ -35,6 +35,12 @@ RULES: list[dict] = [
      "triggers": ["escape", "esc"]},
     {"group": "keys", "label": "backspace", "kind": "key", "key": "BSpace",
      "triggers": ["backspace", "scratch that", "cancella", "cancella quello"]},
+    # Arrow keys — navigate Claude's menus (AskUserQuestion) and the prompt
+    # history. "arrow up/down" only (bare "up"/"down" would shadow the words).
+    {"group": "keys", "label": "↑", "kind": "key", "key": "Up",
+     "triggers": ["arrow up", "up arrow", "freccia su", "freccia in su"]},
+    {"group": "keys", "label": "↓", "kind": "key", "key": "Down",
+     "triggers": ["arrow down", "down arrow", "freccia giù", "freccia in giù"]},
 
     # ── slashes / paths ──────────────────────────────────────────────────────
     {"group": "paths", "label": "/", "kind": "char", "char": "/",
@@ -559,7 +565,8 @@ def looks_like_hallucination(text: str) -> bool:
     return t in _HALLUCINATIONS
 
 
-_KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "Escape": "esc", "BSpace": "⌫", "Newline": "⇧⏎"}
+_KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "Escape": "esc", "BSpace": "⌫",
+              "Newline": "⇧⏎", "Up": "↑", "Down": "↓"}
 
 
 def _rule_out(r: dict) -> str:
@@ -613,6 +620,8 @@ IT_SAY = {
     "enter": "invio",
     "new line": "a capo",
     "backspace": "cancella",
+    "arrow up": "freccia su",
+    "arrow down": "freccia giù",
     "dot": "punto",
     "comma": "virgola",
     "dash": "trattino",
