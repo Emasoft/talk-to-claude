@@ -292,8 +292,30 @@ for _r in RULES:
         _PHRASES[" ".join(_fold(w) for w in _t.split())] = _r
 _MAXW = max(len(p.split()) for p in _PHRASES)
 
+# ── prefix mode (optional, toggled per-connection by the app) ────────────────
+# When enabled, dictation is LITERAL by default and a command fires ONLY when
+# preceded by the prefix word ("command" / "comando"). This trades terser symbol
+# entry for zero false-positives on prose — "enter the room", "She bang it" stay
+# literal. The prefix only "arms" when a real command actually follows it, so the
+# word itself ("run this command") still prints literally (the lookahead gate). A
+# "command symbols" … "command words" burst re-enables command-by-default so dense
+# paths/code don't need a prefix on every token.
+_PREFIX_WORDS = {"command", "commando", "commands", "comando", "comandi"}
+_SYMBOLS_WORDS = {"symbols", "symbol", "simboli", "simbolo"}          # enter burst
+_WORDS_WORDS = {"words", "word", "prose", "text", "parole", "testo"}  # leave burst
 
-def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str]]:
+
+def _command_follows(tokens: list[str], j: int) -> bool:
+    """True if a known command phrase starts at tokens[j] — the prefix-arm lookahead."""
+    m = len(tokens)
+    for w in range(min(_MAXW, m - j), 0, -1):
+        if " ".join(_norm(t) for t in tokens[j:j + w]) in _PHRASES:
+            return True
+    return False
+
+
+def interpret(transcript: str, modes: dict | None = None,
+              prefix_mode: bool = False) -> list[tuple[str, str]]:
     # `modes` carries persistent state ACROSS utterances: spelling + case, AND the
     # editable line buffer (`line`) with its undo/redo stacks and any in-progress
     # delete/replace capture. Pass a dict (mutated in place) to keep all of that
@@ -311,6 +333,7 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
     literal_once = False
     pending_close: str | None = None
     spelling = modes.get("spelling", False)  # persists across utterances
+    sym_mode = modes.get("sym_mode", False)  # prefix-mode symbols burst (persists)
 
     # ── editable-line state (persists until Enter is pressed) ────────────────
     line = modes.get("line", "")            # exact on-screen text since last Enter
@@ -402,6 +425,33 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
 
     i = 0
     while i < n:
+        # ── prefix mode: literal by default; a command needs the "command" prefix ──
+        # The prefix word is consumed in place and we fall through to fire the command
+        # in the SAME iteration, so no cross-token "armed" state is needed. The burst
+        # switch ("command symbols/words") and the lookahead gate live here too.
+        if prefix_mode:
+            ptok = _norm(tokens[i])
+            if ptok in _PREFIX_WORDS:
+                nxt = _norm(tokens[i + 1]) if i + 1 < n else ""
+                if nxt in _SYMBOLS_WORDS:        # "command symbols" → command-by-default burst
+                    sym_mode = True
+                    i += 2
+                    continue
+                if nxt in _WORDS_WORDS:          # "command words" → back to literal
+                    sym_mode = False
+                    i += 2
+                    continue
+                if _command_follows(tokens, i + 1):
+                    i += 1                        # eat the prefix, then fall through to fire it
+                else:
+                    emit_word(tokens[i])          # lookahead gate: bare "command" is literal
+                    i += 1
+                    continue
+            elif not sym_mode and edit_mode is None and not spelling:
+                emit_word(tokens[i])              # literal-by-default
+                i += 1
+                continue
+
         # ── delete/replace capture: collect literal target/replacement words ──
         if edit_mode is not None:
             cmd = None
@@ -518,6 +568,7 @@ def interpret(transcript: str, modes: dict | None = None) -> list[tuple[str, str
 
     flush()
     modes["spelling"] = spelling
+    modes["sym_mode"] = sym_mode
     modes["case_mode"] = case_mode
     modes["line"] = line
     modes["undo"] = undo

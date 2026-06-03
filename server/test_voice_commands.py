@@ -58,15 +58,39 @@ CASES = [
     ("tab key IT", "tabulazione done", "⟨Tab⟩done"),
 ]
 
+# Prefix mode (interpret(..., prefix_mode=True)): literal by default, commands need
+# the "command" prefix. (description, spoken, expected)
+PREFIX_CASES = [
+    ("plain prose is literal", "enter the room and sit down", "enter the room and sit down"),
+    ("the bang bug is gone", "She bang it", "She bang it"),
+    ("dotted words stay literal", "the dot product of a and b", "the dot product of a and b"),
+    ("command + key", "command enter", "⟨Enter⟩"),
+    ("command + arrow", "command arrow up", "⟨Up⟩"),
+    ("command + slash glues like a path", "open src command slash main", "open src/main"),
+    ("each command needs its own prefix",
+     "command open parentheses foo command close parentheses", "(foo)"),
+    ("lookahead gate — bare 'command' is literal", "run this command please", "run this command please"),
+    ("trailing 'command' is literal", "use the slash command", "use the slash command"),
+    ("symbols burst for a path",
+     "command symbols tilde slash Code slash my dash project slash command words",
+     "~/Code/my-project/"),
+    ("caps via prefix",
+     "command start caps mode deploy now command stop caps mode ok", "DEPLOY NOW ok"),
+    ("spell via prefix", "command spell mode al em er command stop spell mode", "lmr"),
+    ("delete via prefix",
+     "hello world command start delete mode world command stop delete mode", "hello world⌫11hello"),
+    ("submit via prefix", "ship it command enter", "ship it⟨Enter⟩"),
+]
 
-def main() -> int:
-    name_w = max(len(c[0]) for c in CASES) + 2
+
+def _run_table(title: str, cases: list, name_w: int, prefix_mode: bool) -> int:
+    print(f"\n  {title}")
     print(f"┏{'━' * name_w}┳━━━━━━━━┓")
     print(f"┃ {'Test'.ljust(name_w - 1)}┃ Status ┃")
     print(f"┡{'━' * name_w}╇━━━━━━━━┩")
     failed = 0
-    for desc, spoken, expected in CASES:
-        got = render(interpret(spoken))
+    for desc, spoken, expected in cases:
+        got = render(interpret(spoken, {}, prefix_mode=prefix_mode))
         ok = got == expected
         if not ok:
             failed += 1
@@ -77,7 +101,14 @@ def main() -> int:
             print(f"│   expected: {expected!r}")
             print(f"│   got     : {got!r}")
     print(f"└{'─' * name_w}┴────────┘")
-    total = len(CASES)
+    return failed
+
+
+def main() -> int:
+    name_w = max(len(c[0]) for c in CASES + PREFIX_CASES) + 2
+    failed = _run_table("Default mode (command-by-default)", CASES, name_w, prefix_mode=False)
+    failed += _run_table("Prefix mode (literal-by-default)", PREFIX_CASES, name_w, prefix_mode=True)
+    total = len(CASES) + len(PREFIX_CASES)
     # Persistent modes: caps/spell carry across utterances when a shared dict is passed.
     m: dict = {}
     persist = (
