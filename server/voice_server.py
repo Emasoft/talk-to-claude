@@ -44,12 +44,14 @@ import asyncio
 import hmac
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import iterm2
 import mlx_whisper
 from aiohttp import WSMsgType, web
 
@@ -101,6 +103,397 @@ def list_sessions():
     return [line for line in out.splitlines() if line.strip()]
 
 
+def _claude_command_names() -> set[str]:
+    """The names Claude Code shows up as in `#{pane_current_command}`. The launcher
+    is a single binary named by its version (e.g. '2.1.161'), so we read the
+    installed-versions directory — version-independent, new releases just work."""
+    names: set[str] = set()
+    cand = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+    try:
+        real = os.path.realpath(cand)
+        if os.path.exists(real):
+            names.add(os.path.basename(real))               # the running version
+            vdir = os.path.dirname(real)                    # .../claude/versions
+            if os.path.basename(vdir) == "versions" and os.path.isdir(vdir):
+                names |= {d for d in os.listdir(vdir) if d and not d.startswith(".")}
+    except OSError:
+        pass
+    return names
+
+
+def _aimaestro_session_names() -> set[str]:
+    """tmux session names owned by ai-maestro agents — excluded for now (a dedicated
+    TalkToClaude variant will drive those). Read from the agent registry."""
+    path = os.path.expanduser("~/.aimaestro/agents/registry.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return set()
+    agents = data.get("agents", []) if isinstance(data, dict) else data
+    names: set[str] = set()
+    if isinstance(agents, list):
+        for a in agents:
+            if isinstance(a, dict):
+                for key in ("name", "label"):
+                    v = a.get(key)
+                    if isinstance(v, str) and v:
+                        names.add(v)
+    return names
+
+
+def _folder_leaf(cwd: str) -> str:
+    """Project-folder name from a cwd (the recognizable label in the app list)."""
+    p = cwd.rstrip("/") or cwd
+    return os.path.basename(p) or p
+
+
+def _discover_tmux() -> list[dict]:
+    """Claude instances in tmux (excluding ai-maestro). Targets are 'tmux:' prefixed."""
+    cmd_names = _claude_command_names()
+    if not cmd_names:
+        return []
+    excluded = _aimaestro_session_names()
+    fields = ("session_name", "window_index", "pane_index",
+              "pane_current_command", "pane_current_path")
+    fmt = "\t".join("#{" + f + "}" for f in fields)
+    code, out, _ = tmux("list-panes", "-a", "-F", fmt)
+    if code != 0:
+        return []
+    found: list[dict] = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 5:
+            continue
+        sess, win, pane, cmd, cwd = parts[:5]
+        if cmd not in cmd_names or sess in excluded:
+            continue
+        target = f"tmux:{sess}:{win}.{pane}"
+        found.append({"id": target, "kind": "tmux", "label": sess,
+                      "cwd": cwd, "title": sess, "target": target})
+    counts: dict[str, int] = {}
+    for s in found:
+        counts[s["label"]] = counts.get(s["label"], 0) + 1
+    for s in found:
+        if counts[s["label"]] > 1:
+            s["label"] = f"{s['label']} ({s['cwd'].rsplit('/', 1)[-1]})"
+    return found
+
+
+def _norm_tty(tty: str) -> str:
+    t = (tty or "").strip()
+    return t[5:] if t.startswith("/dev/") else t
+
+
+def _claude_procs_by_tty() -> dict[str, str]:
+    """Map normalized tty -> working dir for every tab where `claude` is the
+    FOREGROUND process. Two safety filters matter here: (1) the process must be
+    named 'claude' (a bare shell prompt waiting to launch claude has none, so it's
+    excluded), and (2) its stat must carry '+' (foreground process group) — if claude
+    is suspended (Ctrl-Z) or backgrounded, the shell has the foreground and dictated
+    keystrokes would run as SHELL COMMANDS, so such tabs are excluded too."""
+    names = {"claude"} | _claude_command_names()
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,tty=,stat=,comm="],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    pid_tty: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4:
+            continue
+        pid, tty, stat, comm = parts
+        if tty in ("?", "??", "-") or not comm:
+            continue
+        if "+" not in stat:        # not the foreground process — keystrokes would
+            continue               # hit whatever IS foreground (the shell). Skip.
+        if comm in names or os.path.basename(comm) in names:
+            pid_tty.append((pid, _norm_tty(tty)))
+    if not pid_tty:
+        return {}
+    cwds = _lsof_cwds([p for p, _ in pid_tty])
+    return {tty: cwds.get(pid, "") for pid, tty in pid_tty}
+
+
+def _lsof_cwds(pids: list[str]) -> dict[str, str]:
+    try:
+        out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fpn", "-p", ",".join(pids)],
+                             capture_output=True, text=True, timeout=8).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    cwds: dict[str, str] = {}
+    cur = None
+    for line in out.splitlines():
+        if line.startswith("p"):
+            cur = line[1:].strip()
+        elif line.startswith("n") and cur:
+            cwds[cur] = line[1:].strip()
+    return cwds
+
+
+def _app_running(app_bundle_marker: str) -> bool:
+    """True if an app whose executable path contains `app_bundle_marker` is running.
+    Used to avoid LAUNCHING iTerm/Terminal when querying them (we only ask if up)."""
+    try:
+        out = subprocess.run(["ps", "-axo", "command="],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return any(app_bundle_marker in line for line in out.splitlines())
+
+
+def _osascript(script: str, timeout: int = 3) -> tuple[int, str]:
+    try:
+        p = subprocess.run(["osascript", "-e", script],
+                           capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout
+    except (OSError, subprocess.SubprocessError):
+        return 1, ""
+
+
+# Circuit breaker: a terminal whose scripting bridge hangs (e.g. the iTerm 3.7 beta,
+# which routes automation through its Python API and lets AppleScript time out) must
+# not slow down /sessions on every poll. After a failure we skip that app for a while,
+# then retry — so it self-heals if the user fixes/enables scripting.
+_GUI_COOLDOWN: dict[str, float] = {}
+_GUI_COOLDOWN_SEC = 30.0
+
+
+def _gui_skipped(marker: str) -> bool:
+    return time.monotonic() < _GUI_COOLDOWN.get(marker, 0.0)
+
+
+def _gui_failed(marker: str) -> None:
+    _GUI_COOLDOWN[marker] = time.monotonic() + _GUI_COOLDOWN_SEC
+
+
+# ── iTerm2 Python API — the working automation channel (the 3.7-beta AppleScript
+# bridge times out). One persistent connection, lazily (re)created; the breaker
+# guards the connect so a disabled/locked API can't stall discovery. ─────────────
+_ITERM_CONN = None
+
+
+async def _iterm_connection():
+    global _ITERM_CONN
+    if _ITERM_CONN is not None:
+        return _ITERM_CONN
+    if _gui_skipped("iterm") or not _app_running("/iTerm.app/"):
+        return None
+    try:
+        _ITERM_CONN = await asyncio.wait_for(iterm2.Connection.async_create(), timeout=4)
+    except Exception:  # noqa: BLE001 - API off / not approved / iTerm gone
+        _gui_failed("iterm")
+        _ITERM_CONN = None
+    return _ITERM_CONN
+
+
+# Raw bytes a key produces in the TUI — sent verbatim via async_send_text so Enter,
+# arrows (menu/history nav), Esc, Backspace and the no-submit newline all work.
+_KEY_BYTES = {
+    "Enter": "\r",
+    "Tab": "\t",
+    "Escape": "\x1b",
+    "BSpace": "\x7f",
+    "Up": "\x1b[A",
+    "Down": "\x1b[B",
+    "Newline": "\x1b\r",   # Meta+Enter = newline without submitting
+}
+
+
+def _actions_to_text(actions) -> str:
+    parts: list[str] = []
+    for kind, value in actions:
+        if kind == "type":
+            parts.append(value.replace("\r", " ").replace("\n", " "))
+        elif kind == "key":
+            parts.append(_KEY_BYTES.get(value, ""))
+        elif kind == "erase":
+            parts.append("\x7f" * int(value))
+    text = "".join(parts)
+    return text[:MAX_TEXT_LEN] if len(text) > MAX_TEXT_LEN else text
+
+
+_TERMINAL_LIST = (
+    'tell application "Terminal"\n'
+    '  set out to ""\n'
+    '  repeat with w in windows\n'
+    '    set wid to id of w\n'
+    '    set i to 0\n'
+    '    repeat with t in tabs of w\n'
+    '      set i to i + 1\n'
+    '      set ttyv to ""\n'
+    '      try\n'
+    '        set ttyv to tty of t\n'
+    '      end try\n'
+    '      set ttl to ""\n'
+    '      try\n'
+    '        set ttl to custom title of t\n'
+    '      end try\n'
+    '      set out to out & wid & tab & i & tab & ttyv & tab & ttl & linefeed\n'
+    '    end repeat\n'
+    '  end repeat\n'
+    '  return out\n'
+    'end tell\n'
+)
+
+
+async def _discover_iterm_api(claude_ttys: set[str]) -> list[dict]:
+    """iTerm2 tabs whose tty hosts a claude process. id/tty/cwd(`path`)/title come
+    straight from the Python API — no AppleScript, no lsof for the cwd."""
+    if not claude_ttys:
+        return []
+    conn = await _iterm_connection()
+    if conn is None:
+        return []
+    global _ITERM_CONN
+    try:
+        app = await asyncio.wait_for(iterm2.async_get_app(conn), timeout=4)
+        found: list[dict] = []
+        for window in app.windows:
+            for tab in window.tabs:
+                for s in tab.sessions:
+                    tty = _norm_tty(await s.async_get_variable("tty") or "")
+                    if tty not in claude_ttys:
+                        continue
+                    cwd = await s.async_get_variable("path") or ""
+                    title = (await s.async_get_variable("autoName") or "").strip()
+                    target = f"iterm:{s.session_id}"
+                    found.append({"id": target, "kind": "iterm",
+                                  "label": _folder_leaf(cwd) or title or "iTerm",
+                                  "cwd": cwd, "title": title, "target": target})
+        return found
+    except Exception:  # noqa: BLE001 - drop a stale connection, reconnect next poll
+        _ITERM_CONN = None
+        _gui_failed("iterm")
+        return []
+
+
+async def _iterm_send(session_id: str, actions) -> tuple[bool, str]:
+    """Inject an action list into one iTerm2 session — full fidelity (text + raw key
+    sequences) via async_send_text, no forced submit."""
+    conn = await _iterm_connection()
+    if conn is None:
+        return False, "iTerm API not connected"
+    global _ITERM_CONN
+    try:
+        app = await iterm2.async_get_app(conn)
+        sess = app.get_session_by_id(session_id)
+        if sess is None:
+            return False, "iTerm session not found (closed?)"
+        text = _actions_to_text(actions)
+        if text:
+            await sess.async_send_text(text)
+        return True, ""
+    except Exception as e:  # noqa: BLE001
+        _ITERM_CONN = None
+        return False, f"iTerm send failed: {e}"
+
+
+async def _focus_target(target: str) -> tuple[bool, str]:
+    """Bring the selected Claude's tab to the front on the Mac so the monitor shows
+    the session you're talking to. iTerm: select tab + raise window (API) + activate
+    the app. tmux/Terminal: best effort."""
+    kind, addr = _split_target(target)
+    if kind == "iterm":
+        conn = await _iterm_connection()
+        if conn is None:
+            return False, "iTerm API not connected"
+        global _ITERM_CONN
+        try:
+            app = await iterm2.async_get_app(conn)
+            sess = app.get_session_by_id(addr)
+            if sess is None:
+                return False, "iTerm session not found (closed?)"
+            await sess.async_activate(select_tab=True, order_window_front=True)
+            # The API raises the window WITHIN iTerm; `open -b` makes iTerm the active
+            # app so the monitor actually shows it (and switches Space if needed).
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: subprocess.run(["open", "-b", "com.googlecode.iterm2"],
+                                             capture_output=True, timeout=4))
+            return True, ""
+        except Exception as e:  # noqa: BLE001
+            _ITERM_CONN = None
+            return False, f"iTerm focus failed: {e}"
+    if kind == "tmux":
+        # Select the window + pane (a detached session has no attached client to show).
+        code, _, err = tmux("select-window", "-t", addr)
+        tmux("select-pane", "-t", addr)
+        return (code == 0), (err or "")
+    if kind == "terminal":
+        try:
+            wid, idx = addr.split(".", 1)
+        except ValueError:
+            return False, "bad terminal target"
+        code, out = _osascript(
+            'tell application "Terminal" to activate\n'
+            f'tell application "Terminal" to set selected of tab {idx} of window id {wid} to true')
+        return (code == 0), out.strip()
+    return False, "unknown target kind"
+
+
+def _discover_terminal(proc_by_tty: dict[str, str]) -> list[dict]:
+    if not proc_by_tty or _gui_skipped("terminal") or not _app_running("/Terminal.app/"):
+        return []
+    code, out = _osascript(_TERMINAL_LIST)
+    if code != 0:
+        _gui_failed("terminal")
+        return []
+    found: list[dict] = []
+    for line in out.splitlines():
+        parts = line.split("\t", 3)
+        if len(parts) < 4:
+            continue
+        wid, idx, tty, title = parts[0], parts[1], _norm_tty(parts[2]), parts[3]
+        if tty not in proc_by_tty:
+            continue
+        cwd = proc_by_tty[tty]
+        target = f"terminal:{wid}.{idx}"
+        found.append({"id": target, "kind": "terminal",
+                      "label": _folder_leaf(cwd) or title or "Terminal",
+                      "cwd": cwd, "title": title, "target": target})
+    return found
+
+
+_SESS_CACHE: dict = {"ts": 0.0, "val": []}
+_SESS_TTL = 2.0
+
+
+async def discover_claude_sessions() -> list[dict]:
+    """Every running Claude Code instance the Mac can find — tmux (excluding
+    ai-maestro), plus iTerm2 tabs (via the Python API) and Terminal.app tabs. Each:
+    {id, kind, label, cwd, title, target}. `target` is kind-prefixed so injection
+    routes correctly. Cached briefly (the app polls every few seconds) and
+    breaker-guarded so a hung GUI terminal can't stall the call."""
+    now = time.monotonic()
+    if now - _SESS_CACHE["ts"] < _SESS_TTL:
+        return _SESS_CACHE["val"]
+    proc_by_tty = _claude_procs_by_tty()      # tty -> cwd (used by Terminal; keys = claude ttys)
+    sessions = _discover_tmux()
+    sessions += await _discover_iterm_api(set(proc_by_tty))
+    sessions += _discover_terminal(proc_by_tty)
+    _SESS_CACHE["ts"] = now
+    _SESS_CACHE["val"] = sessions
+    return sessions
+
+
+def tmux_target_exists(target: str) -> bool:
+    """True if a tmux session/pane target (no 'tmux:' prefix) is a live pane."""
+    if not target:
+        return False
+    code, _, _ = tmux("display-message", "-t", target, "-p", "ok")
+    return code == 0
+
+
+async def target_exists(target: str) -> bool:
+    """Validate any kind-prefixed target before accepting a stream connection."""
+    kind, addr = _split_target(target)
+    if kind == "tmux":
+        return tmux_target_exists(addr)
+    sessions = await discover_claude_sessions()
+    return any(s["target"] == target for s in sessions)
+
+
 def inject_text(session, text):
     """Type `text` into the session and press Enter. Returns (ok, error)."""
     text = text.replace("\r", " ").replace("\n", " ").strip()
@@ -131,10 +524,28 @@ KEY_MAP = {
 }
 
 
-def execute_actions(session, actions):
-    """Run a verbal-command action list (typed text + key presses) into tmux.
-    Unlike inject_text this does NOT auto-press Enter — the prompt is submitted
-    only when the user says "invio"/"enter" (which produces an Enter key action)."""
+def _split_target(target: str) -> tuple[str, str]:
+    """('tmux'|'iterm'|'terminal', address). A bare value (manual entry) is tmux."""
+    for kind in ("tmux", "iterm", "terminal"):
+        prefix = kind + ":"
+        if target.startswith(prefix):
+            return kind, target[len(prefix):]
+    return "tmux", target
+
+
+async def execute_actions(target, actions):
+    """Inject a verbal-command action list (typed text + key presses) into the
+    selected Claude, routed by target kind. Does NOT auto-press Enter — submission
+    happens only when the user says "invio"/"enter" (an Enter key action)."""
+    kind, addr = _split_target(target)
+    if kind == "iterm":
+        return await _iterm_send(addr, actions)
+    if kind == "terminal":
+        return _terminal_execute(addr, actions)
+    return _tmux_execute(addr, actions)
+
+
+def _tmux_execute(session, actions):
     for kind, value in actions:
         if kind == "type":
             text = value.replace("\r", " ").replace("\n", " ")
@@ -151,12 +562,38 @@ def execute_actions(session, actions):
             if code != 0:
                 return False, err or f"send-keys ({value}) failed"
         elif kind == "erase":
-            # Delete `value` characters to the left (edit modes: delete/replace/undo).
             count = int(value)
             if count > 0:
                 code, _, err = tmux("send-keys", "-t", session, "-N", str(count), "BSpace")
                 if code != 0:
                     return False, err or "send-keys (erase) failed"
+    return True, ""
+
+
+def _as_applescript_str(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _terminal_execute(addr, actions):
+    """Inject into a Terminal.app tab. Terminal's AppleScript can only `do script`,
+    which RUNS (submits) the text — so no partial text, keys, or edits. We send the
+    utterance's typed text as one submitted line (effectively auto-send); bare-key
+    utterances (arrows/escape) are no-ops. iTerm/tmux have no such limit."""
+    text = "".join(v.replace("\r", " ").replace("\n", " ")
+                   for k, v in actions if k == "type")
+    if not text.strip():
+        return True, ""  # nothing typable for Terminal.app to submit
+    if len(text) > MAX_TEXT_LEN:
+        text = text[:MAX_TEXT_LEN]
+    try:
+        wid, idx = addr.split(".", 1)
+    except ValueError:
+        return False, "bad terminal target"
+    script = (f'tell application "Terminal" to do script {_as_applescript_str(text)} '
+              f"in tab {idx} of window id {wid}")
+    code, out = _osascript(script)
+    if code != 0:
+        return False, out.strip() or "Terminal do script failed"
     return True, ""
 
 
@@ -313,7 +750,7 @@ async def handle_health(request):
 async def handle_sessions(request):
     if not authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
-    return web.json_response({"sessions": list_sessions()})
+    return web.json_response({"sessions": await discover_claude_sessions()})
 
 
 async def handle_pane(request):
@@ -352,11 +789,27 @@ async def handle_say(request):
     return web.json_response({"ok": True})
 
 
+async def handle_focus(request):
+    if not authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    target = data.get("session", "")
+    if not isinstance(target, str) or not target:
+        return web.json_response({"error": "session required"}, status=400)
+    ok, err = await _focus_target(target)
+    if not ok:
+        return web.json_response({"error": err}, status=500)
+    return web.json_response({"ok": True})
+
+
 # --------------------------------------------------------------------------- #
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
 _LINE_KEYS = ("line", "undo", "redo", "edit_mode", "edit_target", "edit_repl",
-              "case_mode", "spelling")
+              "case_mode", "spelling", "sym_mode")
 
 
 def _snapshot_modes(m: dict) -> dict:
@@ -407,8 +860,10 @@ async def handle_stream(request):
         await ws.send_json({"type": "error", "error": "unauthorized"})
         await ws.close(code=4003)
         return ws
+    # `session` is now a kind-prefixed target from /sessions discovery
+    # ('tmux:…', 'iterm:…', 'terminal:…'); a bare value is treated as tmux.
     session = str(cfg.get("session", ""))
-    if session not in list_sessions():
+    if not await target_exists(session):
         await ws.send_json({"type": "error", "error": "unknown session"})
         await ws.close()
         return ws
@@ -428,13 +883,15 @@ async def handle_stream(request):
         silence_hold = 0.7
     silence_hold = max(0.3, min(silence_hold, 3.0))
     auto_send = bool(cfg.get("auto_send"))
+    # prefix_mode = literal-by-default; commands need the "command" prefix (see voice_commands).
+    prefix_mode = bool(cfg.get("prefix_mode"))
 
     seg = UtteranceSegmenter(sample_rate=sample_rate, silence_hold_sec=silence_hold)
     modes: dict = {}  # persistent caps/spell + editable-line state for this connection
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate} "
-          f"hold={silence_hold}s auto_send={auto_send}", file=sys.stderr)
+          f"hold={silence_hold}s auto_send={auto_send} prefix_mode={prefix_mode}", file=sys.stderr)
 
     try:
         async for msg in ws:
@@ -460,11 +917,11 @@ async def handle_stream(request):
                         continue
                     if text:
                         before = _snapshot_modes(modes)   # for change-detect + rollback
-                        actions = interpret(text, modes)
+                        actions = interpret(text, modes, prefix_mode=prefix_mode)
                         if auto_send and not (actions and actions[-1] == ("key", "Enter")):
                             actions = actions + [("key", "Enter")]
                             _reset_line(modes)            # auto-submitted -> no longer editable
-                        ok, err = execute_actions(session, actions)
+                        ok, err = await execute_actions(session, actions)
                         if not ok:
                             _restore_modes(modes, before)  # C7: revert the optimistic edit
                         await ws.send_json(
@@ -472,10 +929,12 @@ async def handle_stream(request):
                             | ({} if ok else {"error": err})
                         )
                         now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
-                               modes.get("edit_mode"))
-                        if now != (bool(before["spelling"]), before["case_mode"], before["edit_mode"]):
-                            await ws.send_json({"type": "mode", "spell": now[0],
-                                                "caps": now[1], "edit": now[2]})
+                               modes.get("edit_mode"), bool(modes.get("sym_mode")))
+                        was = (bool(before["spelling"]), before["case_mode"], before["edit_mode"],
+                               bool(before.get("sym_mode")))
+                        if now != was:
+                            await ws.send_json({"type": "mode", "spell": now[0], "caps": now[1],
+                                                "edit": now[2], "symbols": now[3]})
                         print(f"[stream] -> {session}: {text!r} => {render(actions)!r} ok={ok}",
                               file=sys.stderr)
                     else:
@@ -512,6 +971,7 @@ def make_app() -> web.Application:
             web.get("/sessions", handle_sessions),
             web.get("/pane", handle_pane),
             web.post("/say", handle_say),
+            web.post("/focus", handle_focus),
             web.get("/stream", handle_stream),
         ]
     )

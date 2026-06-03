@@ -7,6 +7,7 @@ dependencies = [
     "mlx-whisper>=0.4",
     "aiohttp>=3.10",
     "numpy>=2.0",
+    "iterm2>=2.19",
 ]
 
 [tool.uv]
