@@ -142,17 +142,23 @@ def main() -> int:
     if not persist:
         failed += 1
 
-    # A lone "command" utterance (the VAD split "command" | "enter" off a pause)
-    # arms the prefix so the next utterance's command still fires.
+    # RETROACTIVE cross-utterance prefix: a lone "command" (VAD split "command" |
+    # "enter" off a pause) is written PROVISIONALLY, then the next utterance's
+    # command deletes it (⌫7 = erase "command") and fires instead.
     p = {}
-    interpret("command", p, prefix_mode=True)          # arms — emits nothing
-    armed = (render(interpret("enter", p, prefix_mode=True)) == "⟨Enter⟩")
-    # but a lone "command" followed by plain prose just clears, no false command
+    u1 = render(interpret("command", p, prefix_mode=True))     # provisional literal "command"
+    u2 = render(interpret("enter", p, prefix_mode=True))        # erase it, then fire
+    retro = (u1 == "command" and u2 == "⌫7⟨Enter⟩")
+    # "command" | "start …" also corrects retroactively (region opens)
     p2 = {}
     interpret("command", p2, prefix_mode=True)
-    armed = armed and (render(interpret("hello there", p2, prefix_mode=True)) == "hello there")
-    print(f"lone 'command' arms the next utterance: {'PASS' if armed else 'FAIL'}")
-    if not armed:
+    retro = retro and (render(interpret("start space command stop", p2, prefix_mode=True)) == "⌫7 ")
+    # but a lone "command" followed by plain prose KEEPS the literal word (no erase)
+    p3 = {}
+    interpret("command", p3, prefix_mode=True)
+    retro = retro and (render(interpret("hello there", p3, prefix_mode=True)) == "hello there")
+    print(f"lone 'command' self-corrects retroactively: {'PASS' if retro else 'FAIL'}")
+    if not retro:
         failed += 1
 
     # Whisper hallucination filter: canned phrases / punctuation / music -> dropped;

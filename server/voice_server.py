@@ -831,7 +831,8 @@ async def handle_focus(request):
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
 _LINE_KEYS = ("line", "undo", "redo", "edit_mode", "edit_target", "edit_repl",
-              "case_mode", "spelling", "sym_mode", "num_region", "scope_stack")
+              "case_mode", "spelling", "sym_mode", "num_region", "scope_stack",
+              "armed_prefix_erase")
 
 
 def _snapshot_modes(m: dict) -> dict:
@@ -854,6 +855,7 @@ def _reset_line(m: dict):
     m["edit_mode"] = None
     m["edit_target"] = []
     m["edit_repl"] = []
+    m["armed_prefix_erase"] = 0   # a submitted line drops any provisional-"command" arm
 
 
 async def handle_stream(request):

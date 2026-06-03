@@ -359,6 +359,23 @@ def _command_follows(tokens: list[str], j: int) -> bool:
     return False
 
 
+def _prefix_would_act(tokens: list[str]) -> bool:
+    """True if prepending 'command' to this utterance would fire a command or open a
+    scope — used for RETROACTIVE cross-utterance correction. When a lone 'command'
+    was written provisionally in the previous utterance and THIS one starts with a
+    command word ('enter'), a 'start', or a '<mode> start', we delete the provisional
+    word and reinterpret as 'command <this utterance>'."""
+    if not tokens:
+        return False
+    a = _norm(tokens[0])
+    b = _norm(tokens[1]) if len(tokens) > 1 else ""
+    if a in _START_WORDS:                       # "command" | "start …"
+        return True
+    if a in _MODE_WORDS and b in _START_WORDS:  # "command" | "number start …"
+        return True
+    return _command_follows(tokens, 0)          # "command" | "enter"
+
+
 def _num_value(tok: str) -> int | None:
     """Single token → its numeric value (digit or number word), else None."""
     if tok.isdigit():
@@ -416,6 +433,24 @@ def interpret(transcript: str, modes: dict | None = None,
     edit_mode = modes.get("edit_mode")      # None | delete | replace_find | replace_with
     target: list[str] = modes.get("edit_target", [])  # captured find words
     repl: list[str] = modes.get("edit_repl", [])      # captured replacement words
+
+    # ── retroactive cross-utterance prefix correction ────────────────────────
+    # A previous lone "command" utterance wrote itself PROVISIONALLY (after a pause
+    # we couldn't yet know a command word would follow). If THIS utterance opens
+    # with a command or a scope, erase that provisional word now and reinterpret
+    # the whole utterance as "command <this utterance>". armed_prefix/_baseline are
+    # set later if THIS utterance turns out to be a lone "command".
+    armed_prefix = False
+    armed_baseline = 0
+    armed_erase = int(modes.pop("armed_prefix_erase", 0))   # read + clear (one-shot)
+    if prefix_mode and armed_erase and _prefix_would_act(tokens):
+        if line and armed_erase <= len(line):
+            actions.append(("erase", str(armed_erase)))
+            undo.append(line)
+            redo.clear()
+            line = line[: len(line) - armed_erase]
+        tokens = ["command"] + tokens          # re-arm as if "command" preceded this utterance
+        n = len(tokens)
 
     def flush():
         nonlocal buf, line
@@ -632,9 +667,11 @@ def interpret(transcript: str, modes: dict | None = None,
                 if _command_follows(tokens, i + 1):              # "command <cmd>" = COMMAND(cmd), one arg
                     stack.append("once")
                     i += 1                          # fall through to fire ONE command; close_once() after
-                elif n == 1:                        # a LONE "command" utterance ARMS the prefix for the
-                    stack.append("once")            # NEXT utterance — so a pause that splits "command"
-                    i += 1                          # from its command word ("command" | "enter") still fires
+                elif n == 1:                        # a LONE "command" utterance writes "command"
+                    emit_word(tokens[i])            # PROVISIONALLY and arms a retro-erase: if the NEXT
+                    armed_prefix = True             # utterance starts with a command, we delete this word
+                    armed_baseline = len(line)      # and run it instead (handles a pause splitting
+                    i += 1                          # "command" from its command word into two utterances)
                     continue
                 else:
                     emit_word(tokens[i])            # lookahead gate: bare "command" mid-text is literal
@@ -813,6 +850,10 @@ def interpret(transcript: str, modes: dict | None = None,
             close_once()
 
     flush()
+    # If this utterance was a lone "command", remember how many chars it wrote so the
+    # NEXT utterance can retroactively erase them (see the block at the top).
+    if armed_prefix and len(line) > armed_baseline:
+        modes["armed_prefix_erase"] = len(line) - armed_baseline
     modes["spelling"] = spelling
     modes["scope_stack"] = stack
     modes["sym_mode"] = bool(stack)   # app "symbols" indicator: any command scope open
