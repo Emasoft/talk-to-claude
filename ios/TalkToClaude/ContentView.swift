@@ -265,7 +265,9 @@ struct ContentView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .strokeBorder(.white.opacity(0.25), lineWidth: 0.7))
+                .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
+        .buttonStyle(.plain)
     }
 
     /// Finger-sized glass text button (the EN/IT toggle).
@@ -277,7 +279,9 @@ struct ContentView: View {
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .strokeBorder(.white.opacity(0.35), lineWidth: 0.9))
+                .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
         }
+        .buttonStyle(.plain)
     }
 
     /// The last `lines` transcribed utterances — oldest at top, newest (bright) at the
