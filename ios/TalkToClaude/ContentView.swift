@@ -67,6 +67,13 @@ struct ContentView: View {
                 UIApplication.shared.isIdleTimerDisabled = false
             }
         }
+        // Toggling these in Settings applies to the LIVE stream immediately (no reconnect).
+        .onChange(of: settings.prefixMode) { _, on in
+            if voice.listening { voice.sendControl(prefixMode: on) }
+        }
+        .onChange(of: settings.autoSend) { _, on in
+            if voice.listening { voice.sendControl(autoSend: on) }
+        }
     }
 
     // Glass-chip palette (the ffflux background lives in FluxBackground).
@@ -193,20 +200,15 @@ struct ContentView: View {
         return leaf.isEmpty ? trimmed : leaf
     }
 
-    /// Make `s` the dictation target + focus its tab on the Mac. Switching to a
-    /// DIFFERENT Claude while the mic is live CLOSES the connection to the old one —
-    /// a clean handoff. You tap the mic again to start talking to the new target, so
-    /// a half-spoken sentence can never land in the wrong session.
+    /// Make `s` the dictation target + focus its tab on the Mac. If the mic is live,
+    /// retarget the OPEN stream instantly (no reconnect) — the audio keeps flowing and
+    /// only the injection target changes; the server resets its editable line so a
+    /// half-typed line can't carry over to the new Claude.
     private func selectSession(_ s: ClaudeSession) {
         tapFeedback()
-        let changed = settings.session != s.target
         settings.session = s.target
         Task { await claude.focusSession(s.target) }   // bring its tab to the front on the Mac
-        if changed && voice.listening {
-            audio.stop()
-            voice.stop()
-            UIApplication.shared.isIdleTimerDisabled = false
-        }
+        if voice.listening { voice.sendControl(session: s.target) }
     }
 
     /// The session object for the current target (nil if the chosen Claude isn't in

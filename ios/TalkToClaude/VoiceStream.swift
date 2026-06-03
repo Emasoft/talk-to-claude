@@ -92,6 +92,20 @@ final class VoiceStream: ObservableObject {
         liveTask?.send(.data(data)) { _ in }
     }
 
+    /// Live reconfiguration over the OPEN socket — switch the target Claude or toggle
+    /// prefix mode with no reconnect (instant). No-op when not connected.
+    func sendControl(session: String? = nil, prefixMode: Bool? = nil, autoSend: Bool? = nil) {
+        guard let t = task else { return }
+        var obj: [String: Any] = ["type": "config"]
+        if let session { obj["session"] = session }
+        if let prefixMode { obj["prefix_mode"] = prefixMode }
+        if let autoSend { obj["auto_send"] = autoSend }
+        guard obj.count > 1,
+              let data = try? JSONSerialization.data(withJSONObject: obj),
+              let json = String(data: data, encoding: .utf8) else { return }
+        t.send(.string(json)) { _ in }
+    }
+
     private func receiveLoop() {
         task?.receive { [weak self] result in
             guard let self else { return }

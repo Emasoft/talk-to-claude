@@ -53,21 +53,24 @@ final class ClaudeClient: ObservableObject {
         }
     }
 
-    /// Refresh the list of available tmux sessions for the Settings picker.
+    /// Refresh the running-Claude list. Only republishes values that ACTUALLY changed —
+    /// otherwise every 4-second poll would fire @Published and force a full re-render of
+    /// the shader background + glass chips, which bogs the device down even while idle.
     func loadSessions() async {
         guard let req = makeRequest(path: "/sessions") else { return }
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else {
-                lastError = "Couldn't list sessions"
+                if lastError.isEmpty { lastError = "Couldn't list sessions" }
                 return
             }
             let decoded = try JSONDecoder().decode(SessionsResponse.self, from: data)
-            sessions = decoded.sessions
-            connected = true
-            lastError = ""
+            if decoded.sessions != sessions { sessions = decoded.sessions }
+            if !connected { connected = true }
+            if !lastError.isEmpty { lastError = "" }
         } catch {
-            lastError = "Couldn't list sessions — \(error.localizedDescription)"
+            let msg = "Couldn't list sessions — \(error.localizedDescription)"
+            if lastError != msg { lastError = msg }
         }
     }
 
