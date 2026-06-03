@@ -962,7 +962,27 @@ async def handle_stream(request):
                     else:
                         await ws.send_json({"type": "final", "text": ""})
             elif msg.type == WSMsgType.TEXT:
-                # control messages (e.g. {"type":"flush"}) — reserved for later
+                # Live reconfiguration — switch the target Claude or toggle prefix mode
+                # WITHOUT reconnecting (instant; no slow WS re-handshake + re-validate).
+                try:
+                    upd = json.loads(msg.data)
+                except Exception:  # noqa: BLE001
+                    continue
+                if upd.get("type") == "config":
+                    if "session" in upd:
+                        new_sess = str(upd["session"])
+                        if await target_exists(new_sess):
+                            session = new_sess
+                            _reset_line(modes)     # new target — drop the old editable line
+                            await ws.send_json({"type": "retargeted", "session": session})
+                        else:
+                            await ws.send_json({"type": "error", "error": "unknown session"})
+                    if "prefix_mode" in upd:
+                        prefix_mode = bool(upd["prefix_mode"])
+                    if "auto_send" in upd:
+                        auto_send = bool(upd["auto_send"])
+                    print(f"[stream] reconfigured -> session={session!r} "
+                          f"prefix_mode={prefix_mode} auto_send={auto_send}", file=sys.stderr)
                 continue
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.ERROR):
                 break
