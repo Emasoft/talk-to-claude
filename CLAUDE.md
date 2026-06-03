@@ -2,13 +2,24 @@
 
 Hands-free voice dictation to `claude` CLI sessions. An **iOS app** (iPhone/iPad)
 streams mic audio over Tailscale to a **Mac Python server** that transcribes with
-a local Whisper model and injects the text into the target terminal/Claude tab.
+a local ASR model and injects the text into the target terminal/Claude tab.
 
 ```
-iPhone/iPad (SwiftUI)  ──WebSocket(PCM16 16kHz)──►  Mac server (aiohttp + mlx_whisper)
+iPhone/iPad (SwiftUI)  ──WebSocket(PCM16 16kHz)──►  Mac server (aiohttp + MLX ASR)
    pick a Claude, talk                                  transcribe → interpret → inject
                                                          into the chosen iTerm/tmux tab
 ```
+
+**ASR backend (`--backend`, default `parakeet`):** two selectable MLX backends in
+`voice_server.py`, both batch-per-utterance on a dedicated ASR thread:
+- **parakeet** (default) — NVIDIA Parakeet TDT 0.6b v3 (`mlx-community/parakeet-tdt-0.6b-v3`
+  via `parakeet-mlx`). 25 European languages incl. Italian, RNN-T, ~23× faster than
+  Whisper, near-ZERO hallucinations (no per-utterance language mis-detection). numpy
+  path: `get_logmel(mx.array(audio), model.preprocessor_config)` → `model.generate(mel)`
+  → `[AlignedResult].text`. Verified live on EN+IT macOS-`say` samples.
+- **whisper** — `mlx-community/whisper-large-v3-turbo`. 99 languages, fallback. Its
+  per-utterance language auto-detect produces foreign garbage (`してるし`/`Estados.`) on
+  noise, so the whisper path now DROPS any utterance whose detected language ∉ {en, it}.
 
 ## Layout
 

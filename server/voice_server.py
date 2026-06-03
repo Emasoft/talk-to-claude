@@ -52,7 +52,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import iterm2
+import mlx.core as mx
 import mlx_whisper
+from parakeet_mlx import from_pretrained as _parakeet_from_pretrained
+from parakeet_mlx import audio as _parakeet_audio
 from aiohttp import WSMsgType, web
 
 from voice_commands import cheatsheet, interpret, looks_like_hallucination, render
@@ -60,21 +63,29 @@ from voice_commands import cheatsheet, interpret, looks_like_hallucination, rend
 # Baked default — identical to kDefaultToken in the iOS app. Override with
 # CLAUDE_VOICE_TOKEN or --token.
 DEFAULT_TOKEN = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
-# Whisper-large-v3-turbo: strong on BOTH English and Italian (Qwen3-ASR mangled
-# Italian), auto-detects language per utterance, ~RTF 0.16 on M4 Pro.
-MODEL_ID = "mlx-community/whisper-large-v3-turbo"
+# Two selectable ASR backends (--backend):
+#  • parakeet (DEFAULT): NVIDIA Parakeet TDT 0.6b v3 on MLX — 25 European
+#    languages incl. Italian, RNN-T, ~23× faster than Whisper, near-ZERO
+#    hallucinations (no per-utterance language mis-detection, clean on disfluent
+#    "thinking out loud" dictation).
+#  • whisper: Whisper-large-v3-turbo — 99 languages, batch, more hallucination-
+#    prone; kept as a fallback and for non-European languages.
+WHISPER_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
+PARAKEET_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
+DEFAULT_BACKEND = "parakeet"
+ALLOWED_LANGS = {"en", "it"}   # Whisper-only: drop other-language noise hallucinations
 SAMPLE_RATE = 16000
 MAX_TEXT_LEN = 8000
 
-# Optional Whisper initial_prompt to bias vocabulary. Empty by default so
-# per-utterance language auto-detection (English/Italian) stays clean; a hint can
-# be set per-connection via the WS config if you want to nudge toward jargon.
+# Optional Whisper initial_prompt to bias vocabulary (Whisper backend only).
 DEFAULT_CONTEXT = ""
 
 # Populated in main().
 TOKEN = DEFAULT_TOKEN
 TMUX = "tmux"
-MODEL = MODEL_ID  # the model actually used for transcription (set from --model)
+BACKEND = DEFAULT_BACKEND
+MODEL = ""        # resolved to the active backend's model id in main()
+PARAKEET = None   # loaded ParakeetTDT (on the ASR thread) when BACKEND == "parakeet"
 # All MLX work runs on ONE dedicated thread (max_workers=1): the model is loaded
 # there and every transcription runs there, so MLX's per-thread Metal stream
 # stays consistent. Calling MLX from an arbitrary pooled thread raises
@@ -723,21 +734,47 @@ class UtteranceSegmenter:
         self._speech_win = 0
 
 
-def _load_model(model_id: str):
-    """Warm Whisper ON the ASR worker thread (see ASR_EXECUTOR note). mlx_whisper
-    caches the model by repo, so this one warm-up primes it and every later
-    transcription reuses it on this same thread (keeping the MLX stream stable)."""
-    mlx_whisper.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), path_or_hf_repo=model_id)
+def _load_model(backend: str, model_id: str):
+    """Warm the ASR model ON the ASR worker thread (see ASR_EXECUTOR note) so the
+    model and every later transcription share one MLX Metal stream. Both backends
+    cache by repo, so this single warm-up primes the model."""
+    global PARAKEET
+    warm = np.zeros(SAMPLE_RATE, dtype=np.float32)
+    if backend == "parakeet":
+        PARAKEET = _parakeet_from_pretrained(model_id)
+        PARAKEET.generate(_parakeet_audio.get_logmel(mx.array(warm), PARAKEET.preprocessor_config))
+    else:
+        mlx_whisper.transcribe(warm, path_or_hf_repo=model_id)
 
 
 def transcribe_utterance(audio: np.ndarray, context: str) -> str:
-    """Batch-transcribe one utterance with Whisper. Runs on the ASR thread.
-    Language is auto-detected per utterance (English / Italian / …). Returns ""
-    for silence/noise hallucinations so nothing phantom is injected."""
+    """Batch-transcribe one utterance on the ASR thread. Dispatches to the active
+    backend. Returns "" for silence/noise so nothing phantom is injected."""
+    if BACKEND == "parakeet":
+        return _transcribe_parakeet(audio)
+    return _transcribe_whisper(audio, context)
+
+
+def _transcribe_parakeet(audio: np.ndarray) -> str:
+    """Parakeet TDT 0.6b v3 (25 EU langs incl. IT, RNN-T). It returns empty text on
+    silence on its own, so only the cheap text hallucination filter is needed."""
+    mel = _parakeet_audio.get_logmel(mx.array(audio), PARAKEET.preprocessor_config)
+    results = PARAKEET.generate(mel)
+    text = (results[0].text if results else "").strip()
+    return "" if looks_like_hallucination(text) else text
+
+
+def _transcribe_whisper(audio: np.ndarray, context: str) -> str:
+    """Whisper-large-v3-turbo. Language is auto-detected per utterance."""
     opts = {"path_or_hf_repo": MODEL}
     if context:
         opts["initial_prompt"] = context
     result = mlx_whisper.transcribe(audio, **opts)
+    # Language mis-detection on short/noisy segments produces foreign-language
+    # garbage ("してるし" / "Estados.") — drop anything not heard as EN/IT.
+    lang = result.get("language")
+    if lang and lang not in ALLOWED_LANGS:
+        return ""
     text = (result.get("text", "") or "").strip()
     # Drop hallucinations: if EVERY segment reads as non-speech (high
     # no_speech_prob) or very low confidence, treat the whole utterance as silence.
@@ -1024,19 +1061,23 @@ def make_app() -> web.Application:
 
 
 def main():
-    global TOKEN, TMUX, MODEL
+    global TOKEN, TMUX, MODEL, BACKEND
 
     parser = argparse.ArgumentParser(description="Talk to Claude v2 voice server")
     parser.add_argument("--host", default=None, help="Bind address (default: Tailscale IP)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("CLAUDE_VOICE_PORT", "8765")))
     parser.add_argument("--token", default=os.environ.get("CLAUDE_VOICE_TOKEN", DEFAULT_TOKEN))
     parser.add_argument("--tmux", default=os.environ.get("TMUX_BIN", "tmux"))
-    parser.add_argument("--model", default=MODEL_ID)
+    parser.add_argument("--backend", choices=("parakeet", "whisper"),
+                        default=os.environ.get("CLAUDE_VOICE_BACKEND", DEFAULT_BACKEND),
+                        help="ASR backend (default: parakeet — EU langs incl. IT, near-zero hallucinations)")
+    parser.add_argument("--model", default="", help="Model id; defaults to the backend's model")
     args = parser.parse_args()
 
     TOKEN = args.token
     TMUX = args.tmux
-    MODEL = args.model  # the model actually used for transcription (A1)
+    BACKEND = args.backend
+    MODEL = args.model or (PARAKEET_MODEL_ID if BACKEND == "parakeet" else WHISPER_MODEL_ID)
 
     host = args.host or detect_tailscale_ip()
     no_tailscale = host is None
@@ -1045,18 +1086,19 @@ def main():
         # LAN/world with just the shared token. Pass --host <ip> to expose it.
         host = "127.0.0.1"
 
-    print(f"Loading Whisper model {args.model} (one-time)…", file=sys.stderr)
+    print(f"Loading {BACKEND} model {MODEL} (one-time)…", file=sys.stderr)
     t0 = time.time()
     # Load on the dedicated ASR thread so the model + all inference share one
     # MLX Metal stream.
-    ASR_EXECUTOR.submit(_load_model, args.model).result()
+    ASR_EXECUTOR.submit(_load_model, BACKEND, MODEL).result()
     print(f"Model ready in {time.time() - t0:.1f}s", file=sys.stderr)
 
     print("─" * 64)
     print(" Talk to Claude — v2 voice server")
     print(f"   Listening on : http://{host}:{args.port}   (ws://{host}:{args.port}/stream)")
     print(f"   Token        : {TOKEN}")
-    print(f"   Model        : {args.model}")
+    print(f"   Backend      : {BACKEND}")
+    print(f"   Model        : {MODEL}")
     sessions = list_sessions()
     print(f"   tmux sessions: {', '.join(sessions) if sessions else '(none found)'}")
     if no_tailscale:
