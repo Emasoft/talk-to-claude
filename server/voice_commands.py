@@ -632,8 +632,12 @@ def interpret(transcript: str, modes: dict | None = None,
                 if _command_follows(tokens, i + 1):              # "command <cmd>" = COMMAND(cmd), one arg
                     stack.append("once")
                     i += 1                          # fall through to fire ONE command; close_once() after
+                elif n == 1:                        # a LONE "command" utterance ARMS the prefix for the
+                    stack.append("once")            # NEXT utterance — so a pause that splits "command"
+                    i += 1                          # from its command word ("command" | "enter") still fires
+                    continue
                 else:
-                    emit_word(tokens[i])            # lookahead gate: bare "command" is literal
+                    emit_word(tokens[i])            # lookahead gate: bare "command" mid-text is literal
                     i += 1
                     continue
             # D. Inside the NUMBER block: spoken numbers → concatenated digits.

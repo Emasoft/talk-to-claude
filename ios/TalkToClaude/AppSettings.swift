@@ -27,7 +27,8 @@ final class AppSettings: ObservableObject {
     /// Submit each sentence automatically (vs. saying "invio" to send).
     @Published var autoSend: Bool { didSet { store.set(autoSend, forKey: "autoSend") } }
     /// Literal-by-default: dictation types verbatim and a command only fires when
-    /// preceded by the spoken prefix "command" (vs. command-by-default). Off = legacy.
+    /// preceded by the spoken prefix "command" (vs. command-by-default). Defaults ON —
+    /// it's the primary interaction model; turn it off for legacy command-by-default.
     @Published var prefixMode: Bool { didSet { store.set(prefixMode, forKey: "prefixMode") } }
 
     init() {
@@ -39,7 +40,7 @@ final class AppSettings: ObservableObject {
         session = store.string(forKey: "session") ?? ""   // "" = no Claude chosen yet
         pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
         autoSend = store.object(forKey: "autoSend") as? Bool ?? false
-        prefixMode = store.object(forKey: "prefixMode") as? Bool ?? false
+        prefixMode = store.object(forKey: "prefixMode") as? Bool ?? true
     }
 
     /// Port parsed to an Int, falling back to the default if the field is junk.

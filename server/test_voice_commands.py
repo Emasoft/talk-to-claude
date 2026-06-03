@@ -142,6 +142,19 @@ def main() -> int:
     if not persist:
         failed += 1
 
+    # A lone "command" utterance (the VAD split "command" | "enter" off a pause)
+    # arms the prefix so the next utterance's command still fires.
+    p = {}
+    interpret("command", p, prefix_mode=True)          # arms — emits nothing
+    armed = (render(interpret("enter", p, prefix_mode=True)) == "⟨Enter⟩")
+    # but a lone "command" followed by plain prose just clears, no false command
+    p2 = {}
+    interpret("command", p2, prefix_mode=True)
+    armed = armed and (render(interpret("hello there", p2, prefix_mode=True)) == "hello there")
+    print(f"lone 'command' arms the next utterance: {'PASS' if armed else 'FAIL'}")
+    if not armed:
+        failed += 1
+
     # Whisper hallucination filter: canned phrases / punctuation / music -> dropped;
     # real words (even single ones) -> kept.
     hall = (
