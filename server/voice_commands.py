@@ -125,16 +125,8 @@ RULES: list[dict] = [
     {"group": "brackets", "label": "}", "kind": "char", "char": "}",
      "triggers": ["close curly braces", "close curly brace",
                   "parentesi graffa chiusa", "graffa chiusa"]},
-    {"group": "wrap", "label": "(…)", "kind": "wrap", "open": "(", "close": ")",
-     "triggers": ["in parentheses", "tra parentesi", "fra parentesi"]},
-    {"group": "wrap", "label": "[…]", "kind": "wrap", "open": "[", "close": "]",
-     "triggers": ["in square brackets", "tra parentesi quadre"]},
-    {"group": "wrap", "label": "{…}", "kind": "wrap", "open": "{", "close": "}",
-     "triggers": ["in curly braces", "tra parentesi graffe"]},
-    {"group": "wrap", "label": "\"…\"", "kind": "wrap", "open": "\"", "close": "\"",
-     "triggers": ["in quotes", "tra virgolette"]},
-    {"group": "wrap", "label": "`…`", "kind": "wrap", "open": "`", "close": "`",
-     "triggers": ["in backticks", "tra backtick"]},
+    # (The "in parentheses"/"in quotes"/… wrap-next-word commands were removed —
+    # the explicit OPEN/CLOSE pair covers them and was less ambiguous.)
 
     # ── case / naming ────────────────────────────────────────────────────────
     # CAPS is a START/STOP pair (rendered as one two-row cell in the app). We avoid
@@ -208,6 +200,7 @@ RULES: list[dict] = [
      "triggers": ["start replace mode", "replace mode", "inizia modo sostituzione",
                   "modo sostituzione"]},
     {"group": "editing", "label": "REPLACE WITH", "kind": "replace_with",
+     "pair": "replace", "role": "with",
      "triggers": ["replace with", "sostituisci con"]},
     {"group": "editing", "label": "STOP REPLACE MODE", "kind": "replace_stop",
      "pair": "replace", "role": "stop",
@@ -629,11 +622,6 @@ IT_SAY = {
     "close square brackets": "parentesi quadra chiusa",
     "open curly braces": "parentesi graffa aperta",
     "close curly braces": "parentesi graffa chiusa",
-    "in parentheses": "tra parentesi",
-    "in square brackets": "tra parentesi quadre",
-    "in curly braces": "tra parentesi graffe",
-    "in quotes": "tra virgolette",
-    "in backticks": "tra backtick",
     "start caps mode": "modo maiuscolo",
     "stop caps mode": "modo normale",
     "lowercase": "minuscolo",

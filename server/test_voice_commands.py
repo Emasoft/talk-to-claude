@@ -12,9 +12,6 @@ CASES = [
     ("italian enter (invio)", "git status invio", "git status⟨Enter⟩"),
     ("english enter", "run the tests submit", "run the tests⟨Enter⟩"),
     ("open/close parentheses", "open parentheses foo close parentheses", "(foo)"),
-    ("wrap in parentheses", "in parentheses hello", "(hello)"),
-    ("italian wrap (tra parentesi)", "tra parentesi ciao", "(ciao)"),
-    ("italian square brackets", "tra parentesi quadre x", "[x]"),
     ("all caps then stop", "all caps deploy now stop caps mode please", "DEPLOY NOW please"),
     ("verb-first caps mode", "start caps mode deploy stop caps mode ok", "DEPLOY ok"),
     ("verb-first spell mode", "start spell mode al em er stop spell mode", "lmr"),
@@ -56,7 +53,6 @@ CASES = [
     ("literal escapes command", "literal slash here", "slash here"),
     ("newline IT (a capo)", "first line a capo second", "first line⟨Newline⟩second"),
     ("plain prose untouched", "please summarize the readme file", "please summarize the readme file"),
-    ("in backticks", "in backticks npm install", "`npm` install"),
     ("tab key IT", "tabulazione done", "⟨Tab⟩done"),
 ]
 

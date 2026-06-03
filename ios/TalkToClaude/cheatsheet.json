@@ -586,72 +586,6 @@
     ]
   },
   {
-    "group": "wrap",
-    "items": [
-      {
-        "say": "in parentheses",
-        "say_it": "tra parentesi",
-        "out": "(…)",
-        "label": "(…)",
-        "triggers": [
-          "in parentheses",
-          "tra parentesi",
-          "fra parentesi"
-        ],
-        "pair": null,
-        "role": null
-      },
-      {
-        "say": "in square brackets",
-        "say_it": "tra parentesi quadre",
-        "out": "[…]",
-        "label": "[…]",
-        "triggers": [
-          "in square brackets",
-          "tra parentesi quadre"
-        ],
-        "pair": null,
-        "role": null
-      },
-      {
-        "say": "in curly braces",
-        "say_it": "tra parentesi graffe",
-        "out": "{…}",
-        "label": "{…}",
-        "triggers": [
-          "in curly braces",
-          "tra parentesi graffe"
-        ],
-        "pair": null,
-        "role": null
-      },
-      {
-        "say": "in quotes",
-        "say_it": "tra virgolette",
-        "out": "\"…\"",
-        "label": "\"…\"",
-        "triggers": [
-          "in quotes",
-          "tra virgolette"
-        ],
-        "pair": null,
-        "role": null
-      },
-      {
-        "say": "in backticks",
-        "say_it": "tra backtick",
-        "out": "`…`",
-        "label": "`…`",
-        "triggers": [
-          "in backticks",
-          "tra backtick"
-        ],
-        "pair": null,
-        "role": null
-      }
-    ]
-  },
-  {
     "group": "case",
     "items": [
       {
@@ -979,8 +913,8 @@
           "replace with",
           "sostituisci con"
         ],
-        "pair": null,
-        "role": null
+        "pair": "replace",
+        "role": "with"
       },
       {
         "say": "stop replace mode",

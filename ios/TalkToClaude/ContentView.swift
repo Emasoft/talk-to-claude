@@ -122,18 +122,23 @@ struct ContentView: View {
         }
     }
 
-    /// Collapse the START/STOP rules sharing a `pair` into ordered pairs (start, stop).
+    /// Collapse the START/STOP (and optional WITH) rules sharing a `pair` into ordered
+    /// groups. REPLACE has a middle "replace with" row; the others are just start/stop.
     private func modePairs(from items: [CheatItem]) -> [ModePair] {
-        var byName: [String: (start: CheatItem?, stop: CheatItem?)] = [:]
+        var byName: [String: (start: CheatItem?, middle: CheatItem?, stop: CheatItem?)] = [:]
         var order: [String] = []
         for it in items {
             guard let p = it.pair else { continue }
-            if byName[p] == nil { byName[p] = (nil, nil); order.append(p) }
-            if it.role == "stop" { byName[p]?.stop = it } else { byName[p]?.start = it }
+            if byName[p] == nil { byName[p] = (nil, nil, nil); order.append(p) }
+            switch it.role {
+            case "stop": byName[p]?.stop = it
+            case "with": byName[p]?.middle = it
+            default: byName[p]?.start = it
+            }
         }
         return order.compactMap { name in
             guard let e = byName[name], let s = e.start, let t = e.stop else { return nil }
-            return ModePair(id: name, start: s, stop: t)
+            return ModePair(id: name, start: s, middle: e.middle, stop: t)
         }
     }
 
@@ -147,13 +152,18 @@ struct ContentView: View {
         .fixedSize()
     }
 
-    /// A START/STOP mode as one fixed-width two-row cell sharing the glass chrome:
-    /// START on top (steel output), STOP below (red output) — reads as one toggle.
+    /// A mode rendered as one fixed-width cell sharing the glass chrome: START on top
+    /// (green), STOP at the bottom (red), and — for REPLACE — a middle "REPLACE WITH"
+    /// row (steel). So delete is 2 rows; replace is 3.
     private func pairCell(_ p: ModePair, fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
             VStack(spacing: 1) {
                 slantBicolor(say: (italian ? p.start.sayIt : p.start.say).uppercased(), out: p.start.out,
                              outColor: Self.chipOpen, fontSize: fontSize, sayFills: true)
+                if let mid = p.middle {
+                    slantBicolor(say: (italian ? mid.sayIt : mid.say).uppercased(), out: mid.out,
+                                 outColor: Self.chipOut, fontSize: fontSize, sayFills: true)
+                }
                 slantBicolor(say: (italian ? p.stop.sayIt : p.stop.say).uppercased(), out: p.stop.out,
                              outColor: Self.chipClose, fontSize: fontSize, sayFills: true)
             }
@@ -317,10 +327,12 @@ struct ContentView: View {
     ContentView()
 }
 
-/// A START/STOP mode toggle, assembled from the two `pair`-tagged cheat items.
+/// A mode toggle assembled from `pair`-tagged cheat items: start + stop, plus an
+/// optional middle row (REPLACE's "replace with").
 struct ModePair: Identifiable {
     let id: String
     let start: CheatItem
+    let middle: CheatItem?
     let stop: CheatItem
 }
 
