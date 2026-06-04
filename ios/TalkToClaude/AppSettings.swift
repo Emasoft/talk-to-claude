@@ -30,6 +30,9 @@ final class AppSettings: ObservableObject {
     /// preceded by the spoken prefix "command" (vs. command-by-default). Defaults ON —
     /// it's the primary interaction model; turn it off for legacy command-by-default.
     @Published var prefixMode: Bool { didSet { store.set(prefixMode, forKey: "prefixMode") } }
+    /// Run a small local LLM over each transcription before injecting it, fixing
+    /// mis-heard technical terms / homophones / accent errors (~0.4s/utterance).
+    @Published var correct: Bool { didSet { store.set(correct, forKey: "correct") } }
 
     init() {
         // didSet does not fire for assignments made inside init, so these reads
@@ -41,6 +44,7 @@ final class AppSettings: ObservableObject {
         pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
         autoSend = store.object(forKey: "autoSend") as? Bool ?? false
         prefixMode = store.object(forKey: "prefixMode") as? Bool ?? true
+        correct = store.object(forKey: "correct") as? Bool ?? true
     }
 
     /// Port parsed to an Int, falling back to the default if the field is junk.

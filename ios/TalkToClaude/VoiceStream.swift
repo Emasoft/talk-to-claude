@@ -61,6 +61,7 @@ final class VoiceStream: ObservableObject {
             "silence_hold": settings.pauseThreshold,  // pause (s) that ends a sentence
             "auto_send": settings.autoSend,            // submit each sentence automatically
             "prefix_mode": settings.prefixMode,        // literal-by-default; commands need "command"
+            "correct": settings.correct,               // local-LLM cleanup of each transcription
         ]
         if let data = try? JSONSerialization.data(withJSONObject: cfg),
            let json = String(data: data, encoding: .utf8) {
@@ -94,12 +95,14 @@ final class VoiceStream: ObservableObject {
 
     /// Live reconfiguration over the OPEN socket — switch the target Claude or toggle
     /// prefix mode with no reconnect (instant). No-op when not connected.
-    func sendControl(session: String? = nil, prefixMode: Bool? = nil, autoSend: Bool? = nil) {
+    func sendControl(session: String? = nil, prefixMode: Bool? = nil, autoSend: Bool? = nil,
+                     correct: Bool? = nil) {
         guard let t = task else { return }
         var obj: [String: Any] = ["type": "config"]
         if let session { obj["session"] = session }
         if let prefixMode { obj["prefix_mode"] = prefixMode }
         if let autoSend { obj["auto_send"] = autoSend }
+        if let correct { obj["correct"] = correct }
         guard obj.count > 1,
               let data = try? JSONSerialization.data(withJSONObject: obj),
               let json = String(data: data, encoding: .utf8) else { return }

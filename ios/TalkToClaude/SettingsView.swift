@@ -80,16 +80,20 @@ struct SettingsView: View {
                     } label: {
                         Label("Command grammar", systemImage: "text.book.closed")
                     }
+                    Toggle("Clean up with AI", isOn: $settings.correct)
                 } header: {
                     Text("Voice")
                 } footer: {
-                    Text(settings.prefixMode
-                        ? "ON: everything is typed literally — a command fires only when you say “command” first (e.g. “command enter”). Wrap many commands with “command start … command stop”, or a mode block like “command number start … number stop”. See Command grammar above.\n\nChanges apply the next time you tap the mic."
-                        : "OFF (default): command words convert automatically (“slash” → /, “enter” → ⏎). Faster for symbols, but common words can get caught.\n\nChanges apply the next time you tap the mic.")
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(settings.prefixMode
+                            ? "Prefix ON: everything is typed literally — a command fires only when you say “command” first (e.g. “command enter”). Wrap many with “command start … command stop”. See Command grammar above."
+                            : "Prefix OFF (default): command words convert automatically (“slash” → /, “enter” → ⏎). Faster for symbols, but common words can get caught.")
+                        Text("“Clean up with AI” runs a small local model over each transcription to fix mis-heard technical terms and homophones (~0.4s slower). All toggles apply live to the running mic.")
+                    }
                 }
 
                 Section {
-                    Text("Your voice is streamed to the Mac over Tailscale's encrypted tunnel and transcribed there by a local Whisper model — nothing leaves your network. The Mac detects speech pauses automatically, so just talk; no need to tap send.")
+                    Text("Your voice is streamed to the Mac over Tailscale's encrypted tunnel and transcribed there by a local AI model (Parakeet), optionally cleaned up by a local LLM — nothing leaves your network. The Mac detects speech pauses automatically, so just talk; no need to tap send.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
