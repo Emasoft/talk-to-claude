@@ -86,6 +86,18 @@ TMUX = "tmux"
 BACKEND = DEFAULT_BACKEND
 MODEL = ""        # resolved to the active backend's model id in main()
 PARAKEET = None   # loaded ParakeetTDT (on the ASR thread) when BACKEND == "parakeet"
+
+# ── optional LLM correction (--correct) ──────────────────────────────────────
+# A small local instruct model (mlx-lm) fixes ASR mis-transcriptions — mis-heard
+# technical/code terms, homophones, accent errors — BEFORE the text is injected.
+# 3B + few-shot catches the hard phonetic mis-hearings (strap→Stripe,
+# off-indication→authentication) at ~0.4s/utterance without over-correcting clean
+# text. Runs on the same ASR thread as transcription (one MLX Metal stream).
+CORRECT_MODEL_ID = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+CORRECT_ENABLED = True   # server default; --no-correct disables, app toggles per-connection
+CORRECT_VOCAB = ""       # optional known-terms hint (--correct-vocab "Stripe, tmux, MLX")
+CORRECTOR = None         # (model, tokenizer) loaded lazily on the ASR thread
+_CORRECT_SAMPLER = None
 # All MLX work runs on ONE dedicated thread (max_workers=1): the model is loaded
 # there and every transcription runs there, so MLX's per-thread Metal stream
 # stays consistent. Calling MLX from an arbitrary pooled thread raises
@@ -791,6 +803,62 @@ def _transcribe_whisper(audio: np.ndarray, context: str) -> str:
     return text
 
 
+_CORRECT_SYSTEM = (
+    "You correct speech-to-text errors in voice dictation about software development. "
+    "The recognizer mis-hears words, especially technical terms (libraries, APIs, "
+    "identifiers), proper nouns, and homophones. Replace each mis-heard word with the word "
+    "MOST LIKELY actually spoken, judged by how similar they SOUND, using any known terms "
+    "given. Preserve wording, meaning, length, and intent. Do NOT paraphrase, answer, "
+    "translate, or comment. If already correct, return it verbatim. Output ONLY the "
+    "corrected text."
+)
+# Few-shot pairs — these are what make a 3B model fix the HARD phonetic mis-hearings
+# (and NOT over-correct already-correct text). Verified empirically before shipping.
+_CORRECT_SHOTS = (
+    ("Known terms: Stripe\nTranscription: replace the fake strap test",
+     "replace the fake Stripe test"),
+    ("Transcription: I need to right the off indication module",
+     "I need to write the authentication module"),
+    ("Transcription: Is there a better way to solve this?",
+     "Is there a better way to solve this?"),
+)
+
+
+def _ensure_corrector():
+    """Lazy-load the correction LLM ON the ASR thread so it shares the MLX Metal
+    stream with the ASR model. Cheap after the first call (model is cached)."""
+    global CORRECTOR, _CORRECT_SAMPLER
+    if CORRECTOR is None:
+        from mlx_lm import load
+        from mlx_lm.sample_utils import make_sampler
+        CORRECTOR = load(CORRECT_MODEL_ID)
+        _CORRECT_SAMPLER = make_sampler(temp=0.0)   # deterministic — no creative rewriting
+
+
+def correct_text(raw: str) -> str:
+    """Fix ASR mis-transcriptions with the local LLM (runs on the ASR thread). Falls
+    back to the raw text on any anomaly, so correction can never make things worse."""
+    if not raw or not raw.strip():
+        return raw
+    from mlx_lm import generate
+    _ensure_corrector()
+    model, tok = CORRECTOR
+    msgs = [{"role": "system", "content": _CORRECT_SYSTEM}]
+    for u, a in _CORRECT_SHOTS:
+        msgs += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
+    user = (f"Known terms: {CORRECT_VOCAB}\n" if CORRECT_VOCAB else "") + f"Transcription: {raw}"
+    msgs.append({"role": "user", "content": user})
+    prompt = tok.apply_chat_template(msgs, add_generation_prompt=True)
+    # Cap generation to ~4 tokens/word so it can't run off into a paraphrase or answer.
+    cap = min(200, max(32, len(raw.split()) * 4 + 16))
+    out = generate(model, tok, prompt=prompt, max_tokens=cap,
+                   sampler=_CORRECT_SAMPLER, verbose=False).strip()
+    # Safety net: empty or wildly-longer output means the model misbehaved — keep raw.
+    if not out or len(out) > len(raw) * 2 + 40:
+        return raw
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # HTTP helpers
 # --------------------------------------------------------------------------- #
@@ -946,13 +1014,16 @@ async def handle_stream(request):
     auto_send = bool(cfg.get("auto_send"))
     # prefix_mode = literal-by-default; commands need the "command" prefix (see voice_commands).
     prefix_mode = bool(cfg.get("prefix_mode"))
+    # correct = run the local LLM correction pass over each transcription before inject.
+    correct = bool(cfg.get("correct", CORRECT_ENABLED))
 
     seg = UtteranceSegmenter(sample_rate=sample_rate, silence_hold_sec=silence_hold)
     modes: dict = {}  # persistent caps/spell + editable-line state for this connection
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate} "
-          f"hold={silence_hold}s auto_send={auto_send} prefix_mode={prefix_mode}", file=sys.stderr)
+          f"hold={silence_hold}s auto_send={auto_send} prefix_mode={prefix_mode} "
+          f"correct={correct}", file=sys.stderr)
 
     try:
         async for msg in ws:
@@ -976,6 +1047,13 @@ async def handle_stream(request):
                     except Exception as e:  # noqa: BLE001 - report, don't drop the stream
                         await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
                         continue
+                    if text and correct:
+                        # Fix ASR mis-transcriptions before command interpretation +
+                        # injection. Best-effort: on failure keep the raw text.
+                        try:
+                            text = await loop.run_in_executor(ASR_EXECUTOR, correct_text, text)
+                        except Exception as e:  # noqa: BLE001
+                            print(f"[stream] correction failed (using raw): {e}", file=sys.stderr)
                     if text:
                         before = _snapshot_modes(modes)   # for change-detect + rollback
                         actions = interpret(text, modes, prefix_mode=prefix_mode)
@@ -1021,8 +1099,11 @@ async def handle_stream(request):
                         prefix_mode = bool(upd["prefix_mode"])
                     if "auto_send" in upd:
                         auto_send = bool(upd["auto_send"])
+                    if "correct" in upd:
+                        correct = bool(upd["correct"])
                     print(f"[stream] reconfigured -> session={session!r} "
-                          f"prefix_mode={prefix_mode} auto_send={auto_send}", file=sys.stderr)
+                          f"prefix_mode={prefix_mode} auto_send={auto_send} correct={correct}",
+                          file=sys.stderr)
                 continue
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.ERROR):
                 break
@@ -1061,7 +1142,7 @@ def make_app() -> web.Application:
 
 
 def main():
-    global TOKEN, TMUX, MODEL, BACKEND
+    global TOKEN, TMUX, MODEL, BACKEND, CORRECT_ENABLED, CORRECT_MODEL_ID, CORRECT_VOCAB
 
     parser = argparse.ArgumentParser(description="Talk to Claude v2 voice server")
     parser.add_argument("--host", default=None, help="Bind address (default: Tailscale IP)")
@@ -1072,12 +1153,20 @@ def main():
                         default=os.environ.get("CLAUDE_VOICE_BACKEND", DEFAULT_BACKEND),
                         help="ASR backend (default: parakeet — EU langs incl. IT, near-zero hallucinations)")
     parser.add_argument("--model", default="", help="Model id; defaults to the backend's model")
+    parser.add_argument("--correct", action=argparse.BooleanOptionalAction, default=CORRECT_ENABLED,
+                        help="LLM correction of ASR output before inject (--no-correct to disable)")
+    parser.add_argument("--correct-model", default=CORRECT_MODEL_ID, help="mlx-lm model for correction")
+    parser.add_argument("--correct-vocab", default=os.environ.get("CLAUDE_VOICE_VOCAB", ""),
+                        help="Known terms hint for correction, e.g. 'Stripe, tmux, MLX'")
     args = parser.parse_args()
 
     TOKEN = args.token
     TMUX = args.tmux
     BACKEND = args.backend
     MODEL = args.model or (PARAKEET_MODEL_ID if BACKEND == "parakeet" else WHISPER_MODEL_ID)
+    CORRECT_ENABLED = args.correct
+    CORRECT_MODEL_ID = args.correct_model
+    CORRECT_VOCAB = args.correct_vocab
 
     host = args.host or detect_tailscale_ip()
     no_tailscale = host is None
@@ -1092,6 +1181,11 @@ def main():
     # MLX Metal stream.
     ASR_EXECUTOR.submit(_load_model, BACKEND, MODEL).result()
     print(f"Model ready in {time.time() - t0:.1f}s", file=sys.stderr)
+    if CORRECT_ENABLED:
+        print(f"Loading correction model {CORRECT_MODEL_ID} (one-time)…", file=sys.stderr)
+        t0 = time.time()
+        ASR_EXECUTOR.submit(_ensure_corrector).result()   # preload on the ASR thread
+        print(f"Corrector ready in {time.time() - t0:.1f}s", file=sys.stderr)
 
     print("─" * 64)
     print(" Talk to Claude — v2 voice server")
@@ -1099,6 +1193,7 @@ def main():
     print(f"   Token        : {TOKEN}")
     print(f"   Backend      : {BACKEND}")
     print(f"   Model        : {MODEL}")
+    print(f"   Correction   : {CORRECT_MODEL_ID if CORRECT_ENABLED else 'off'}")
     sessions = list_sessions()
     print(f"   tmux sessions: {', '.join(sessions) if sessions else '(none found)'}")
     if no_tailscale:

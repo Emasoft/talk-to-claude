@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.0",
     "iterm2>=2.19",
     "parakeet-mlx>=0.5.1",
+    "mlx-lm>=0.31.3",
 ]
 
 [tool.uv]
