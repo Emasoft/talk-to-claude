@@ -3,6 +3,11 @@
 Speak to a running `claude` session from your iPhone/iPad over Tailscale,
 hands-free and continuously.
 
+**100% free and open source (MIT).** No accounts, no fees, no in-app purchases,
+no ads, no telemetry — and it always will be. The iOS app is free on the App
+Store; the Mac side is this repository, which you run yourself with a one-line
+installer (see [Install the ASR on your Mac](#install-the-asr-on-your-mac)).
+
 Your iPhone streams raw microphone audio to your Mac, which segments speech with
 an energy VAD, transcribes each finished sentence locally with **Whisper**
 (mlx), turns spoken commands into keystrokes, and injects them into a `claude`
@@ -119,3 +124,60 @@ server you host, which needs careful review notes) — lives in
   Backgrounding stops capture and restores other apps' audio.
 - Targets the **CLI in tmux** — not the Claude Desktop app.
 - Run the interpreter tests with `cd server && uv run python test_voice_commands.py`.
+
+## Install the ASR on your Mac
+
+The Mac side installs with **one line** — no manual setup. Paste this into a
+Terminal on a Mac running **macOS 15 (Sequoia) or newer**:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emasoft/talk-to-claude/main/install.sh | bash
+```
+
+It installs everything needed (Homebrew, `uv`, `ffmpeg`, the Hugging Face CLI),
+downloads the **Whisper** speech model (MIT‑licensed, free), sets up a Python
+environment, and registers a background service that survives reboots. At the
+end it prints the IP / port / token to type into the app. It is **idempotent** —
+re‑running it just updates things. To remove everything:
+`server/asr-service.sh uninstall`.
+
+Everything the installer pulls in is free and open source. You can also see this
+one‑liner inside the app under **Settings → "Install the ASR for free on your
+Mac."**
+
+## Free & open source
+
+- The app is **free on the App Store**, with **no** in‑app purchases, paid tiers,
+  subscriptions, ads, or telemetry — now and always.
+- The full source (iOS app + Mac server) is in this repository under the **MIT
+  License** ([`LICENSE`](LICENSE)). You may use, modify, and redistribute it.
+- The speech model is **OpenAI Whisper**, released under the **MIT License** — no
+  fees, no usage limits, self‑hosted on your own Mac.
+
+## Legal & disclaimers
+
+_These apply worldwide, in every region where the app is offered._
+
+- **No affiliation with Anthropic.** "Talk to Claude" is an independent,
+  community‑built companion for the official Claude CLI. It is **not** created,
+  endorsed, sponsored by, or affiliated with **Anthropic PBC**. "Claude" is a
+  trademark of Anthropic; it is used here only nominatively to describe
+  interoperability with the Claude CLI. All trademarks belong to their
+  respective owners.
+- **You bring your own Claude.** The app does not include, bundle, or provide
+  access to any Claude model or API. It types text into a `claude` CLI session
+  **you** already run on **your** Mac under **your** own agreement with Anthropic.
+  Your use of the Claude CLI is governed by Anthropic's terms, not by this app.
+- **You host the service.** Speech recognition runs on **your** Mac via the
+  companion server in this repository. The developer operates no servers and
+  receives none of your data. See [`PRIVACY.md`](PRIVACY.md).
+- **No warranty.** The software is provided "AS IS", without warranty of any
+  kind, to the fullest extent permitted by applicable law. See [`LICENSE`](LICENSE).
+  Nothing here limits any non‑waivable statutory consumer rights you may have in
+  your country.
+- **Third‑party software.** Whisper (MIT), `mlx-whisper` (MIT), `aiohttp`
+  (Apache‑2.0), `numpy` (BSD‑3‑Clause), and other dependencies remain under
+  their own licenses; their copyright notices are retained.
+- **Free forever.** The app and this source will remain free of charge. If that
+  ever changes for new, clearly‑separate features, the version published under
+  the MIT License will always remain free and open.

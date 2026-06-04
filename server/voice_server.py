@@ -56,8 +56,6 @@ import numpy as np
 import iterm2
 import mlx.core as mx
 import mlx_whisper
-from parakeet_mlx import from_pretrained as _parakeet_from_pretrained
-from parakeet_mlx import audio as _parakeet_audio
 from aiohttp import WSMsgType, web
 
 from voice_commands import cheatsheet, interpret, looks_like_hallucination, render
@@ -65,16 +63,16 @@ from voice_commands import cheatsheet, interpret, looks_like_hallucination, rend
 # Baked default — identical to kDefaultToken in the iOS app. Override with
 # CLAUDE_VOICE_TOKEN or --token.
 DEFAULT_TOKEN = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
-# Two selectable ASR backends (--backend):
-#  • parakeet (DEFAULT): NVIDIA Parakeet TDT 0.6b v3 on MLX — 25 European
-#    languages incl. Italian, RNN-T, ~23× faster than Whisper, near-ZERO
-#    hallucinations (no per-utterance language mis-detection, clean on disfluent
-#    "thinking out loud" dictation).
-#  • whisper: Whisper-large-v3-turbo — 99 languages, batch, more hallucination-
-#    prone; kept as a fallback and for non-European languages.
+# ASR backend (--backend):
+#  • whisper (DEFAULT): Whisper-large-v3-turbo on MLX — 99 languages, MIT-licensed
+#    and free. The only backend the standard one-line installer sets up.
+#  • parakeet (OPTIONAL): NVIDIA Parakeet TDT 0.6b v3 — 25 European languages incl.
+#    Italian, RNN-T, faster, fewer hallucinations. Requires the optional dependency
+#    (`uv sync --extra parakeet`); parakeet_mlx is imported lazily (see _load_backend
+#    and _transcribe_parakeet) so the server runs fine when it isn't installed.
 WHISPER_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
 PARAKEET_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
-DEFAULT_BACKEND = "parakeet"
+DEFAULT_BACKEND = "whisper"
 ALLOWED_LANGS = {"en", "it"}   # Whisper-only: drop other-language noise hallucinations
 SAMPLE_RATE = 16000
 MAX_TEXT_LEN = 8000
@@ -782,6 +780,30 @@ class UtteranceSegmenter:
         self._speech_win = 0
 
 
+# parakeet_mlx is an OPTIONAL backend dependency, imported lazily so the default
+# Whisper-only install runs without it. Cached after the first successful import.
+_PARAKEET_FROM_PRETRAINED = None
+_PARAKEET_AUDIO = None
+
+
+def _import_parakeet():
+    """Lazily import the optional parakeet_mlx backend, with a clear error if the
+    optional dependency isn't installed (the default install is Whisper-only)."""
+    global _PARAKEET_FROM_PRETRAINED, _PARAKEET_AUDIO
+    if _PARAKEET_FROM_PRETRAINED is None:
+        try:
+            from parakeet_mlx import audio as p_audio
+            from parakeet_mlx import from_pretrained as fp
+        except ImportError as exc:
+            raise SystemExit(
+                "The 'parakeet' backend needs the optional parakeet-mlx package. "
+                "Install it with:  uv sync --extra parakeet\n"
+                "(The default 'whisper' backend needs nothing extra.)"
+            ) from exc
+        _PARAKEET_FROM_PRETRAINED, _PARAKEET_AUDIO = fp, p_audio
+    return _PARAKEET_FROM_PRETRAINED, _PARAKEET_AUDIO
+
+
 def _load_model(backend: str, model_id: str):
     """Warm the ASR model ON the ASR worker thread (see ASR_EXECUTOR note) so the
     model and every later transcription share one MLX Metal stream. Both backends
@@ -789,8 +811,9 @@ def _load_model(backend: str, model_id: str):
     global PARAKEET
     warm = np.zeros(SAMPLE_RATE, dtype=np.float32)
     if backend == "parakeet":
-        PARAKEET = _parakeet_from_pretrained(model_id)
-        PARAKEET.generate(_parakeet_audio.get_logmel(mx.array(warm), PARAKEET.preprocessor_config))
+        from_pretrained, p_audio = _import_parakeet()
+        PARAKEET = from_pretrained(model_id)
+        PARAKEET.generate(p_audio.get_logmel(mx.array(warm), PARAKEET.preprocessor_config))
     else:
         mlx_whisper.transcribe(warm, path_or_hf_repo=model_id)
 
@@ -817,7 +840,8 @@ def _transcribe_parakeet(audio: np.ndarray) -> str:
     accented/noisy speech as a non-Latin language (e.g. Russian/Cyrillic). The user
     only dictates Latin-script English + Italian, so a predominantly non-Latin
     transcription is a mis-detection, not real speech — drop it."""
-    mel = _parakeet_audio.get_logmel(mx.array(audio), PARAKEET.preprocessor_config)
+    _, p_audio = _import_parakeet()
+    mel = p_audio.get_logmel(mx.array(audio), PARAKEET.preprocessor_config)
     results = PARAKEET.generate(mel)
     text = (results[0].text if results else "").strip()
     if not text or looks_like_hallucination(text):
@@ -1323,7 +1347,8 @@ def main():
     parser.add_argument("--tmux", default=os.environ.get("TMUX_BIN", "tmux"))
     parser.add_argument("--backend", choices=("parakeet", "whisper"),
                         default=os.environ.get("CLAUDE_VOICE_BACKEND", DEFAULT_BACKEND),
-                        help="ASR backend (default: parakeet — EU langs incl. IT, near-zero hallucinations)")
+                        help="ASR backend (default: whisper — MIT-licensed, free; "
+                             "parakeet is optional, needs `uv sync --extra parakeet`)")
     parser.add_argument("--model", default="", help="Model id; defaults to the backend's model")
     parser.add_argument("--correct", action=argparse.BooleanOptionalAction, default=CORRECT_ENABLED,
                         help="LLM correction of ASR output before inject (--no-correct to disable)")

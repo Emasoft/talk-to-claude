@@ -20,9 +20,10 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/talktoclaude-asr.log"
 DOMAIN="gui/$(id -u)"
 PORT="${CLAUDE_VOICE_PORT:-8765}"
-# ASR backend baked into the LaunchAgent. Default parakeet; switch with:
-#   ASR_BACKEND=whisper ./asr-service.sh install   (revert: ./asr-service.sh install)
-BACKEND="${ASR_BACKEND:-parakeet}"
+# ASR backend baked into the LaunchAgent. Default whisper (MIT-licensed, free).
+# The optional parakeet backend needs its extra first (uv sync --extra parakeet):
+#   ASR_BACKEND=parakeet ./asr-service.sh install
+BACKEND="${ASR_BACKEND:-whisper}"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -195,7 +196,7 @@ cmd_status() {
   local be=""
   [ -f "$PLIST" ] && be="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$PLIST" 2>/dev/null \
     | grep -iE 'parakeet|whisper' | head -1 | tr -d ' ')"
-  say "backend : ${be:-parakeet}"
+  say "backend : ${be:-whisper}"
   say "plist   : $PLIST"
   say "logs    : $LOG"
 }

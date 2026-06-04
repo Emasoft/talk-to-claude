@@ -377,6 +377,10 @@ dependencies = [
     { name = "mlx-lm" },
     { name = "mlx-whisper" },
     { name = "numpy" },
+]
+
+[package.optional-dependencies]
+parakeet = [
     { name = "parakeet-mlx" },
 ]
 
@@ -387,8 +391,9 @@ requires-dist = [
     { name = "mlx-lm", specifier = ">=0.31.3" },
     { name = "mlx-whisper", specifier = ">=0.4" },
     { name = "numpy", specifier = ">=2.0" },
-    { name = "parakeet-mlx", specifier = ">=0.5.1" },
+    { name = "parakeet-mlx", marker = "extra == 'parakeet'", specifier = ">=0.5.1" },
 ]
+provides-extras = ["parakeet"]
 
 [[package]]
 name = "click"

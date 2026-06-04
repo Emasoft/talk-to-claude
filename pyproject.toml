@@ -1,16 +1,21 @@
 [project]
 name = "claude-voice-server"
 version = "2.0.0"
-description = "Streaming voice -> Qwen3-ASR (MLX) -> tmux Claude injection server"
+description = "Streaming voice -> Whisper (MLX) -> tmux/iTerm Claude injection server"
 requires-python = ">=3.12"
 dependencies = [
     "mlx-whisper>=0.4",
     "aiohttp>=3.10",
     "numpy>=2.0",
     "iterm2>=2.19",
-    "parakeet-mlx>=0.5.1",
     "mlx-lm>=0.31.3",
 ]
+
+# Whisper (MIT) is the default and only required backend. Parakeet is an optional
+# advanced backend — install with `uv sync --extra parakeet` and run the server
+# with `--backend parakeet`. Keeping it optional makes the default install lean.
+[project.optional-dependencies]
+parakeet = ["parakeet-mlx>=0.5.1"]
 
 [tool.uv]
 package = false
