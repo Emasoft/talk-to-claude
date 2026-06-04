@@ -142,7 +142,9 @@ struct CommandTestView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("cmdtest_idx") private var idx = 0   // resume position persists across reopen
     @State private var results: [Int: Bool] = [:]    // phrase index → passed (latest attempt)
+    @State private var attempted: Set<Int> = []      // phrases recorded THIS session
     @State private var showSummary = false
+    @State private var autoSummaryShown = false      // auto-open the summary once, when all done
     @State private var confirmInterrupt = false
 
     init(settings: AppSettings) {
@@ -174,7 +176,10 @@ struct CommandTestView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
 
-                    Button { tester.recording ? tester.stop() : tester.start() } label: {
+                    Button {
+                        if tester.recording { tester.stop() }
+                        else { attempted.insert(idx); tester.start() }   // mark this phrase attempted
+                    } label: {
                         Label(tester.recording ? "Stop" : "Record & read",
                               systemImage: tester.recording ? "stop.circle.fill" : "mic.circle.fill")
                             .font(.title3).frame(maxWidth: .infinity).padding(.vertical, 10)
@@ -186,13 +191,13 @@ struct CommandTestView: View {
                     resultRow("Interpreter produced", tester.result.isEmpty ? "—" : tester.result)
                     resultRow("Expected", current.expect)
 
-                    if hasResult && !tester.recording {
+                    if let r = results[idx], !tester.recording {
                         HStack(spacing: 8) {
-                            Image(systemName: passed ? "checkmark.seal.fill" : "xmark.seal.fill")
-                            Text(passed ? "PASS — command recognized" : "FAIL — see “heard” above")
+                            Image(systemName: r ? "checkmark.seal.fill" : "xmark.seal.fill")
+                            Text(r ? "PASS — command recognized" : "FAIL — see “heard” above")
                                 .bold()
                         }
-                        .foregroundStyle(passed ? .green : .red)
+                        .foregroundStyle(r ? .green : .red)
                     }
 
                     if !tester.diagnostic.isEmpty {
@@ -210,12 +215,12 @@ struct CommandTestView: View {
                     HStack {
                         Button("Previous") { step(-1) }.disabled(tester.recording || idx == 0)
                         Spacer()
-                        Text("✓ \(results.values.filter { $0 }.count) / \(results.count) tested")
+                        Text("\(results.count)/\(tester.suite.count) done · \(results.values.filter { $0 }.count) passed")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        // Can't advance until this step has actually produced a result.
+                        // Can't advance until this step has been recorded (passed or failed).
                         Button("Next phrase") { step(1) }
-                            .disabled(tester.recording || !hasResult || idx >= tester.suite.count - 1)
+                            .disabled(tester.recording || results[idx] == nil || idx >= tester.suite.count - 1)
                     }
                     .padding(.top, 4)
                 }
@@ -249,9 +254,16 @@ struct CommandTestView: View {
     }
 
     private func recordResult() {
-        guard let c = current, hasResult else { return }
+        // Record once the user has actually recorded this phrase — even if the recognizer
+        // returned nothing (that's a FAIL, and the step still counts as done/attempted).
+        guard let c = current, attempted.contains(idx) else { return }
         results[idx] = (tester.result == c.expect)
         saveResults()
+        // All phrases done → pop the summary automatically (once per run).
+        if results.count >= tester.suite.count && !tester.suite.isEmpty && !autoSummaryShown {
+            autoSummaryShown = true
+            showSummary = true
+        }
     }
 
     private func saveResults() {
@@ -271,6 +283,8 @@ struct CommandTestView: View {
         tester.stop()
         idx = 0
         results = [:]
+        attempted = []
+        autoSummaryShown = false
         saveResults()
         clearStep()
     }
