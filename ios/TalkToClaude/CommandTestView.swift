@@ -137,12 +137,18 @@ final class CommandTester: ObservableObject {
     }
 }
 
+private struct PhraseResult: Codable {
+    var passed: Bool
+    var produced: String   // what the interpreter built (compared to expected)
+    var heard: String      // raw Whisper transcript (for diagnosis)
+}
+
 struct CommandTestView: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var tester: CommandTester
     @Environment(\.dismiss) private var dismiss
     @AppStorage("cmdtest_idx") private var idx = 0   // resume position persists across reopen
-    @State private var results: [Int: Bool] = [:]    // phrase index → passed (latest attempt)
+    @State private var results: [Int: PhraseResult] = [:]   // phrase index → latest attempt
     @State private var attempted: Set<Int> = []      // phrases recorded THIS session
     @State private var showSummary = false
     @State private var autoSummaryShown = false      // auto-open the summary once, when all done
@@ -178,8 +184,8 @@ struct CommandTestView: View {
                     .padding().background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
 
                     Button {
-                        if tester.recording { tester.stop() }
-                        else { attempted.insert(idx); tester.start() }   // mark this phrase attempted
+                        if tester.recording { tester.stop(); recordResult() }   // record on every Stop
+                        else { attempted.insert(idx); tester.start() }          // mark this phrase attempted
                     } label: {
                         Label(tester.recording ? "Stop" : "Record & read",
                               systemImage: tester.recording ? "stop.circle.fill" : "mic.circle.fill")
@@ -203,11 +209,11 @@ struct CommandTestView: View {
 
                     if let r = results[idx], !tester.recording {
                         HStack(spacing: 8) {
-                            Image(systemName: r ? "checkmark.seal.fill" : "xmark.seal.fill")
-                            Text(r ? "PASS — command recognized" : "FAIL — see “heard” above")
+                            Image(systemName: r.passed ? "checkmark.seal.fill" : "xmark.seal.fill")
+                            Text(r.passed ? "PASS — command recognized" : "FAIL — see “heard” above")
                                 .bold()
                         }
-                        .foregroundStyle(r ? .green : .red)
+                        .foregroundStyle(r.passed ? .green : .red)
                     }
 
                     if !tester.diagnostic.isEmpty {
@@ -225,7 +231,7 @@ struct CommandTestView: View {
                     HStack {
                         Button("Previous") { step(-1) }.disabled(tester.recording || idx == 0)
                         Spacer()
-                        Text("\(results.count)/\(tester.suite.count) done · \(results.values.filter { $0 }.count) passed")
+                        Text("\(results.count)/\(tester.suite.count) done · \(results.values.filter { $0.passed }.count) passed")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         // Can't advance until this step has been recorded (passed or failed).
@@ -256,10 +262,12 @@ struct CommandTestView: View {
         } message: {
             Text("You can resume later from this point, or restart from the beginning.")
         }
-        .sheet(isPresented: $showSummary) { summaryView }
+        // Dismissing the summary (Done or swipe) closes the whole test, not back to phrase 28.
+        .sheet(isPresented: $showSummary, onDismiss: { dismiss() }) { summaryView }
         .task { loadResults(); await tester.loadSuite() }
         .onChange(of: tester.recording) { _, rec in if !rec { recordResult() } }
-        .onChange(of: tester.result) { _, _ in if !tester.recording { recordResult() } }
+        .onChange(of: tester.result) { _, _ in recordResult() }   // record live as results arrive
+        .onChange(of: tester.heard) { _, _ in recordResult() }
         .onDisappear { tester.stop() }
     }
 
@@ -267,7 +275,8 @@ struct CommandTestView: View {
         // Record once the user has actually recorded this phrase — even if the recognizer
         // returned nothing (that's a FAIL, and the step still counts as done/attempted).
         guard let c = current, attempted.contains(idx) else { return }
-        results[idx] = (tester.result == c.expect)
+        results[idx] = PhraseResult(passed: tester.result == c.expect,
+                                    produced: tester.result, heard: tester.heard)
         saveResults()
         // All phrases done → pop the summary automatically (once per run).
         if results.count >= tester.suite.count && !tester.suite.isEmpty && !autoSummaryShown {
@@ -285,7 +294,7 @@ struct CommandTestView: View {
 
     private func loadResults() {
         guard let d = UserDefaults.standard.data(forKey: "cmdtest_results"),
-              let keyed = try? JSONDecoder().decode([String: Bool].self, from: d) else { return }
+              let keyed = try? JSONDecoder().decode([String: PhraseResult].self, from: d) else { return }
         results = Dictionary(uniqueKeysWithValues: keyed.compactMap { k, v in Int(k).map { ($0, v) } })
     }
 
@@ -312,7 +321,7 @@ struct CommandTestView: View {
     }
 
     private var summaryHeader: String {
-        let p = results.values.filter { $0 }.count
+        let p = results.values.filter { $0.passed }.count
         return "\(p) / \(results.count) passed"
     }
 
@@ -340,19 +349,64 @@ struct CommandTestView: View {
     }
 
     private func summaryRow(_ i: Int, _ ph: TestPhrase) -> some View {
-        let r: Bool? = results[i]
-        let icon = r == nil ? "circle.dashed" : (r! ? "checkmark.circle.fill" : "xmark.circle.fill")
-        let color: Color = r == nil ? .secondary : (r! ? .green : .red)
+        let r = results[i]
+        let icon = r == nil ? "circle.dashed" : (r!.passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+        let color: Color = r == nil ? .secondary : (r!.passed ? .green : .red)
+        // On a fail, char-diff expected vs produced — differing letters in red on both lines.
+        let diff: (AttributedString, AttributedString)? =
+            (r != nil && !r!.passed) ? lcsDiff(ph.expect, r!.produced) : nil
         return HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon).foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(ph.note).font(.callout)
-                if r == false {
-                    Text("expected: \(ph.expect)")
-                        .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                if let diff {
+                    Text(diffLine("want  ", diff.0))
+                        .font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
+                    Text(diffLine("got   ", diff.1))
+                        .font(.system(.caption2, design: .monospaced)).textSelection(.enabled)
                 }
             }
         }
+    }
+
+    /// A grey label prefix joined to the (red-diffed) text, as one AttributedString.
+    private func diffLine(_ label: String, _ diff: AttributedString) -> AttributedString {
+        var s = AttributedString(label)
+        s.foregroundColor = .secondary
+        return s + diff
+    }
+
+    /// Char-level LCS diff: returns (expected, produced) as AttributedStrings where the
+    /// characters that DON'T line up (the actual differences) are coloured red.
+    private func lcsDiff(_ a: String, _ b: String) -> (AttributedString, AttributedString) {
+        let ac = Array(a), bc = Array(b)
+        let n = ac.count, m = bc.count
+        var dp = Array(repeating: Array(repeating: 0, count: m + 1), count: n + 1)
+        if n > 0 && m > 0 {
+            for ii in stride(from: n - 1, through: 0, by: -1) {
+                for jj in stride(from: m - 1, through: 0, by: -1) {
+                    dp[ii][jj] = ac[ii] == bc[jj] ? dp[ii + 1][jj + 1] + 1
+                        : max(dp[ii + 1][jj], dp[ii][jj + 1])
+                }
+            }
+        }
+        var aCommon = Array(repeating: false, count: n)
+        var bCommon = Array(repeating: false, count: m)
+        var ii = 0, jj = 0
+        while ii < n && jj < m {
+            if ac[ii] == bc[jj] { aCommon[ii] = true; bCommon[jj] = true; ii += 1; jj += 1 }
+            else if dp[ii + 1][jj] >= dp[ii][jj + 1] { ii += 1 } else { jj += 1 }
+        }
+        func build(_ chars: [Character], _ common: [Bool]) -> AttributedString {
+            var s = AttributedString("")
+            for (k, ch) in chars.enumerated() {
+                var piece = AttributedString(ch == "\n" ? "⏎" : String(ch))
+                piece.foregroundColor = common[k] ? .secondary : .red
+                s += piece
+            }
+            return s
+        }
+        return (build(ac, aCommon), build(bc, bCommon))
     }
 
     private func resultRow(_ label: String, _ value: String) -> some View {
