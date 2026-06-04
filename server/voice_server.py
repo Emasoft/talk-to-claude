@@ -82,6 +82,22 @@ MAX_TEXT_LEN = 8000
 # Optional Whisper initial_prompt to bias vocabulary (Whisper backend only).
 DEFAULT_CONTEXT = ""
 
+# In prefix mode, prime Whisper with the command vocabulary so it transcribes the
+# keywords correctly — "start" (not "third"), "command" (not "come and"), "number",
+# "caps", "stop" — instead of their phonetic neighbours. initial_prompt biases the
+# decoder toward this text; the example phrases bias the n-grams ("number start",
+# "caps stop") the grammar depends on.
+COMMAND_CONTEXT = (
+    "Voice editing commands for a terminal. Keywords: command, start, stop, caps, "
+    "spell, number, delete, replace, backword, undo, redo, slash, dot, comma, colon, "
+    "dash, enter, backspace, space, tab, escape, up, down. "
+    "Typical phrases: command enter. command backspace. command slash. "
+    "command start backspace three times command stop. "
+    "command caps start deploy now caps stop. "
+    "command number start one two three number stop. "
+    "command spell start a b c spell stop. command backword two."
+)
+
 # Populated in main().
 TOKEN = DEFAULT_TOKEN
 TMUX = "tmux"
@@ -911,6 +927,41 @@ async def handle_sessions(request):
     return web.json_response({"sessions": await discover_claude_sessions()})
 
 
+# Self-test phrases for the in-app "Command self-test". The expected result is COMPUTED
+# from the real interpreter (net line) so it can never drift from the grammar. Each is
+# line-verifiable (a typing result), covering single / region / nested / concatenated
+# commands and the editing verbs (backspace, backword, delete, replace) + interrogative.
+COMMAND_TEST_PHRASES = [
+    ("command slash", "single command"),
+    ("command caps start deploy caps stop", "CAPS mode block"),
+    ("command number start one two three number stop", "NUMBER mode block"),
+    ("command start slash dot dash command stop", "region: 3 concatenated commands"),
+    ("command caps start spell start a b c spell stop caps stop", "nested CAPS over SPELL"),
+    ("test command start backspace two times command stop", "type, then BACKSPACE x2"),
+    ("alpha beta command start backword one command stop", "type, then BACKWORD one word"),
+    ("hello world command delete start world delete stop", "type, then DELETE a word"),
+    ("git status command replace start status replace with commit replace stop",
+     "type, then REPLACE a word"),
+    ("hello command question mark", "interrogative: ends with ?"),
+    ("command start number start four five number stop caps start hi caps stop command stop",
+     "region: NUMBER then CAPS concatenated"),
+    ("command number start four five number stop caps start hi caps stop",
+     "one argument: only NUMBER is a command, the rest is literal"),
+]
+
+
+async def handle_test_suite(request):
+    if not authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    phrases = []
+    for phrase, note in COMMAND_TEST_PHRASES:
+        m: dict = {}
+        interpret(phrase, m, prefix_mode=True)   # the NET line is the expected result
+        phrases.append({"phrase": phrase, "expect": m.get("line", ""), "note": note})
+    print(f"[test-suite] served {len(phrases)} phrases", file=sys.stderr)
+    return web.json_response({"phrases": phrases})
+
+
 async def handle_pane(request):
     if not authorized(request):
         return web.json_response({"error": "unauthorized"}, status=401)
@@ -1023,12 +1074,15 @@ async def handle_stream(request):
     # `session` is now a kind-prefixed target from /sessions discovery
     # ('tmux:…', 'iterm:…', 'terminal:…'); a bare value is treated as tmux.
     session = str(cfg.get("session", ""))
-    if not await target_exists(session):
+    # dry_run = self-test mode: transcribe + interpret but DON'T inject anywhere (and
+    # skip the target check, since there's no real Claude session behind it).
+    dry_run = bool(cfg.get("dry_run"))
+    if not dry_run and not await target_exists(session):
         await ws.send_json({"type": "error", "error": "unknown session"})
         await ws.close()
         return ws
 
-    context = str(cfg.get("context") or DEFAULT_CONTEXT)
+    context = str(cfg.get("context") or "")   # explicit app override; else chosen below by mode
     sample_rate = int(cfg.get("sample_rate") or SAMPLE_RATE)
     if sample_rate != SAMPLE_RATE:
         # Whisper assumes 16 kHz and we don't resample; the app always sends 16 kHz.
@@ -1045,6 +1099,10 @@ async def handle_stream(request):
     auto_send = bool(cfg.get("auto_send"))
     # prefix_mode = literal-by-default; commands need the "command" prefix (see voice_commands).
     prefix_mode = bool(cfg.get("prefix_mode"))
+    # In prefix mode, bias Whisper toward the command vocabulary (unless the app sent an
+    # explicit context). This is what stops "start" → "third" and "command" → "come and".
+    if not context:
+        context = COMMAND_CONTEXT if prefix_mode else DEFAULT_CONTEXT
     # correct = run the local LLM correction pass over each transcription before inject.
     correct = bool(cfg.get("correct", CORRECT_ENABLED))
 
@@ -1054,7 +1112,7 @@ async def handle_stream(request):
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate} "
           f"hold={silence_hold}s auto_send={auto_send} prefix_mode={prefix_mode} "
-          f"correct={correct}", file=sys.stderr)
+          f"correct={correct} biased={bool(context)}", file=sys.stderr)
 
     try:
         async for msg in ws:
@@ -1094,11 +1152,15 @@ async def handle_stream(request):
                         if auto_send and not (actions and actions[-1] == ("key", "Enter")):
                             actions = actions + [("key", "Enter")]
                             _reset_line(modes)            # auto-submitted -> no longer editable
-                        ok, err = await execute_actions(session, actions)
-                        if not ok:
-                            _restore_modes(modes, before)  # C7: revert the optimistic edit
+                        if dry_run:
+                            ok, err = True, None          # self-test: never touch a real session
+                        else:
+                            ok, err = await execute_actions(session, actions)
+                            if not ok:
+                                _restore_modes(modes, before)  # C7: revert the optimistic edit
                         await ws.send_json(
-                            {"type": "final", "text": text, "rendered": render(actions), "injected": ok}
+                            {"type": "final", "text": text, "rendered": render(actions),
+                             "line": modes.get("line", ""), "injected": ok}
                             | ({} if ok else {"error": err})
                         )
                         now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
@@ -1166,6 +1228,7 @@ def make_app() -> web.Application:
         [
             web.get("/health", handle_health),
             web.get("/sessions", handle_sessions),
+            web.get("/test-suite", handle_test_suite),
             web.get("/pane", handle_pane),
             web.post("/say", handle_say),
             web.post("/focus", handle_focus),
