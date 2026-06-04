@@ -19,7 +19,16 @@ final class VoiceStream: ObservableObject {
     @Published var symbolsMode = false // prefix-mode "command symbols" burst is active
 
     private let settings: AppSettings
-    private let urlSession = URLSession(configuration: .default)
+    // A long-lived WebSocket: the server only sends data back WHEN you speak, so a long
+    // thinking-pause means no downstream bytes. The default 60s request timeout would drop
+    // the socket on such an idle gap ("the operation couldn't be completed"). Raise it so
+    // idle pauses don't kill the connection; auto-reconnect handles genuine drops.
+    private let urlSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 86_400   // ~1 day — effectively no idle timeout
+        cfg.waitsForConnectivity = true
+        return URLSession(configuration: cfg)
+    }()
     private var task: URLSessionWebSocketTask?
     // Read from the audio thread in sendPCM; written on the main actor. The race
     // is benign — a stale reference just sends to a closing socket, which is a
