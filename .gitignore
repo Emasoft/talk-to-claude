@@ -28,3 +28,7 @@ models/
 
 # Secrets / local overrides
 .env
+
+# Local tooling state (Claude Code, ai-maestro janitor) — never committed
+.claude/
+.janitor/
