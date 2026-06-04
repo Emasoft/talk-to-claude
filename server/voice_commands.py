@@ -404,7 +404,7 @@ def _prefix_would_act(tokens: list[str]) -> bool:
         return False
     a = _norm(tokens[0])
     b = _norm(tokens[1]) if len(tokens) > 1 else ""
-    if a in _START_WORDS or a in _STOP_WORDS:            # "command" | "start …" / "stop"
+    if a in _START_WORDS or a in _STOP_WORDS or a in ("on", "off"):  # start/stop/on/off
         return True
     if a in _MODE_WORDS and (b in _START_WORDS or b in _STOP_WORDS):  # "command" | "number start/stop"
         return True
@@ -798,11 +798,11 @@ def interpret(transcript: str, modes: dict | None = None,
                 continue
             # C. The "command" prefix opens a new argument (or is literal via the gate).
             if ptok in _PREFIX_WORDS:
-                if nxt in _START_WORDS:                          # "command start" → region (many args)
-                    stack.append("cmd")
-                    i += 2
-                    continue
-                if nxt in _STOP_WORDS:                           # "command stop" → close the region
+                if nxt in _START_WORDS or nxt == "on":           # "command start"/"command on" →
+                    stack.append("cmd")                          # open a persistent command latch:
+                    i += 2                                       # commands fire WITHOUT a per-word
+                    continue                                     # "command" until you close it.
+                if nxt in _STOP_WORDS or nxt == "off":           # "command stop"/"command off" → close
                     close_region()
                     i += 2
                     continue

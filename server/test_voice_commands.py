@@ -228,6 +228,17 @@ def main() -> int:
         print(f"  simple={bl.get('line')!r}\n  num={bn.get('line')!r}\n  split={bs.get('line')!r}")
         failed += 1
 
+    # "command on … command off" — ergonomic alias for the command-region latch: inside,
+    # commands fire WITHOUT a per-word "command"; non-command words stay literal; bare
+    # "on"/"off" in prose are untouched.
+    latch = (render(interpret("command on slash dot dash command off", {}, prefix_mode=True)) == "/.-"
+             and render(interpret("command on hello slash world command off", {}, prefix_mode=True))
+                 == "hello/world"
+             and render(interpret("turn it on and off", {}, prefix_mode=True)) == "turn it on and off")
+    print(f"command on/off latch (no per-word prefix): {'PASS' if latch else 'FAIL'}")
+    if not latch:
+        failed += 1
+
     # Continuation merge: a thinking pause splits one sentence; the continuation
     # opens with a continuation word, so we strip Whisper's pause-"?" and lowercase
     # the opener, flowing the two fragments into one line.

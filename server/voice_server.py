@@ -949,8 +949,8 @@ COMMAND_TEST_PHRASES = [
     ("command number start four five number stop caps start hi caps stop",
      "one argument: only NUMBER is a command, the rest is literal"),
     # ── real-world dictation: URLs, code, markdown ──
-    ("https command colon command slash command slash github command dot com",
-     "URL: https://github.com"),
+    ("command on https colon slash slash github dot com command off",
+     "URL via the command latch (no per-symbol prefix): https://github.com"),
     ("command open quotes hello world command close quotes", "double-quoted string"),
     ("command open parentheses foo command close parentheses", "parentheses"),
     ("command backtick npm install command backtick", "inline code (backticks)"),
