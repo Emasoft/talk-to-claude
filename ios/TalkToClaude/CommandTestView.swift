@@ -37,6 +37,7 @@ final class CommandTester: ObservableObject {
     @Published var error = ""
     @Published var diagnostic = ""        // audio-health hint from the server (low/noisy/no-audio)
     @Published var diagnosticLevel = ""   // "warn" | "error"
+    @Published var voiceProcessing = false  // Apple noise-suppression engaged for this recording
     @Published fileprivate var suite: [TestPhrase] = FALLBACK_SUITE
 
     private let settings: AppSettings
@@ -88,7 +89,7 @@ final class CommandTester: ObservableObject {
         }
         receive()
         audio.onPCM = { [weak self] data in self?.liveTask?.send(.data(data)) { _ in } }
-        do { try audio.start(); recording = true }
+        do { try audio.start(); recording = true; voiceProcessing = audio.voiceProcessing }
         catch {
             self.error = error.localizedDescription
             stop()
@@ -186,6 +187,15 @@ struct CommandTestView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(tester.recording ? .red : .accentColor)
+
+                    if tester.recording {
+                        Label(tester.voiceProcessing
+                                  ? "Apple noise suppression + voice focus: ON"
+                                  : "Noise suppression unavailable on this mic/route",
+                              systemImage: tester.voiceProcessing ? "waveform.badge.mic" : "mic.slash")
+                            .font(.caption2)
+                            .foregroundStyle(tester.voiceProcessing ? .green : .orange)
+                    }
 
                     resultRow("Whisper heard", tester.heard.isEmpty ? "—" : tester.heard)
                     resultRow("Interpreter produced", tester.result.isEmpty ? "—" : tester.result)

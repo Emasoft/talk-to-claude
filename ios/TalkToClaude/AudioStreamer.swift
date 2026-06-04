@@ -17,6 +17,9 @@ final class AudioStreamer {
         commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true
     )!
     private(set) var isRunning = false
+    /// Whether Apple's Voice Processing I/O (ambient-noise suppression + echo
+    /// cancellation + voice-band AGC) actually engaged on this device/route.
+    private(set) var voiceProcessing = false
 
     func start() throws {
         guard !isRunning else { return }
@@ -36,7 +39,18 @@ final class AudioStreamer {
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
             let input = engine.inputNode
-            try? input.setVoiceProcessingEnabled(true)  // belt-and-braces AEC/NS
+            // Apple's Voice Processing I/O — the SDK's ambient-noise suppression + echo
+            // cancellation + voice-band focus, tuned for the human voice. Don't swallow a
+            // failure: record whether it actually engaged so the UI can show it. Pairs with
+            // the .voiceChat session mode set above (both route through Apple's VPIO unit).
+            do {
+                try input.setVoiceProcessingEnabled(true)
+                input.isVoiceProcessingAGCEnabled = true        // auto-gain on the voice band
+                voiceProcessing = input.isVoiceProcessingEnabled
+            } catch {
+                voiceProcessing = false
+                NSLog("AudioStreamer: voice processing unavailable — %@", error.localizedDescription)
+            }
             let hwFormat = input.outputFormat(forBus: 0)
             guard let conv = AVAudioConverter(from: hwFormat, to: targetFormat) else {
                 throw NSError(domain: "AudioStreamer", code: 1, userInfo: [
