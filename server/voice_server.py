@@ -50,6 +50,8 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import unicodedata
+
 import numpy as np
 import iterm2
 import mlx.core as mx
@@ -768,13 +770,30 @@ def transcribe_utterance(audio: np.ndarray, context: str) -> str:
     return _transcribe_whisper(audio, context)
 
 
+def _is_latin(ch: str) -> bool:
+    try:
+        return "LATIN" in unicodedata.name(ch)
+    except ValueError:
+        return False
+
+
 def _transcribe_parakeet(audio: np.ndarray) -> str:
-    """Parakeet TDT 0.6b v3 (25 EU langs incl. IT, RNN-T). It returns empty text on
-    silence on its own, so only the cheap text hallucination filter is needed."""
+    """Parakeet TDT 0.6b v3 (25 EU langs incl. IT, RNN-T). Returns empty text on
+    silence on its own. Also drops NON-LATIN output: the multilingual model
+    auto-detects language per utterance (no override in parakeet-mlx) and mis-detects
+    accented/noisy speech as a non-Latin language (e.g. Russian/Cyrillic). The user
+    only dictates Latin-script English + Italian, so a predominantly non-Latin
+    transcription is a mis-detection, not real speech — drop it."""
     mel = _parakeet_audio.get_logmel(mx.array(audio), PARAKEET.preprocessor_config)
     results = PARAKEET.generate(mel)
     text = (results[0].text if results else "").strip()
-    return "" if looks_like_hallucination(text) else text
+    if not text or looks_like_hallucination(text):
+        return ""
+    letters = [c for c in text if c.isalpha()]
+    if letters and sum(_is_latin(c) for c in letters) / len(letters) < 0.5:
+        print(f"[stream] dropped non-Latin (lang mis-detect): {text!r}", file=sys.stderr)
+        return ""
+    return text
 
 
 def _transcribe_whisper(audio: np.ndarray, context: str) -> str:
