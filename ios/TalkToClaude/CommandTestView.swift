@@ -139,9 +139,11 @@ final class CommandTester: ObservableObject {
 struct CommandTestView: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var tester: CommandTester
-    @State private var idx = 0
-    @State private var results: [Int: Bool] = [:]   // phrase index → passed (latest attempt)
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("cmdtest_idx") private var idx = 0   // resume position persists across reopen
+    @State private var results: [Int: Bool] = [:]    // phrase index → passed (latest attempt)
     @State private var showSummary = false
+    @State private var confirmInterrupt = false
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -206,12 +208,14 @@ struct CommandTestView: View {
                     }
 
                     HStack {
-                        Button("Previous") { step(-1) }.disabled(idx == 0)
+                        Button("Previous") { step(-1) }.disabled(tester.recording || idx == 0)
                         Spacer()
                         Text("✓ \(results.values.filter { $0 }.count) / \(results.count) tested")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Next phrase") { step(1) }.disabled(idx >= tester.suite.count - 1)
+                        // Can't advance until this step has actually produced a result.
+                        Button("Next phrase") { step(1) }
+                            .disabled(tester.recording || !hasResult || idx >= tester.suite.count - 1)
                     }
                     .padding(.top, 4)
                 }
@@ -219,13 +223,29 @@ struct CommandTestView: View {
             .padding()
         }
         .navigationTitle("Command self-test")
+        .navigationBarBackButtonHidden(true)
+        .interactiveDismissDisabled(tester.recording)   // a swipe-down can't kill a running test
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    if tester.recording { confirmInterrupt = true } else { dismiss() }
+                } label: {
+                    Label("Settings", systemImage: "chevron.backward")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Summary") { recordResult(); showSummary = true }
             }
         }
+        .confirmationDialog("Interrupt the test?", isPresented: $confirmInterrupt, titleVisibility: .visible) {
+            Button("Interrupt & exit", role: .destructive) { tester.stop(); dismiss() }
+            Button("Restart from the beginning") { restart() }
+            Button("Keep testing", role: .cancel) { }
+        } message: {
+            Text("You can resume later from this point, or restart from the beginning.")
+        }
         .sheet(isPresented: $showSummary) { summaryView }
-        .task { await tester.loadSuite() }
+        .task { loadResults(); await tester.loadSuite() }
         .onChange(of: tester.recording) { _, rec in if !rec { recordResult() } }
         .onChange(of: tester.result) { _, _ in if !tester.recording { recordResult() } }
         .onDisappear { tester.stop() }
@@ -234,14 +254,40 @@ struct CommandTestView: View {
     private func recordResult() {
         guard let c = current, hasResult else { return }
         results[idx] = (tester.result == c.expect)
+        saveResults()
+    }
+
+    private func saveResults() {
+        let keyed = Dictionary(uniqueKeysWithValues: results.map { (String($0.key), $0.value) })
+        if let d = try? JSONEncoder().encode(keyed) {
+            UserDefaults.standard.set(d, forKey: "cmdtest_results")
+        }
+    }
+
+    private func loadResults() {
+        guard let d = UserDefaults.standard.data(forKey: "cmdtest_results"),
+              let keyed = try? JSONDecoder().decode([String: Bool].self, from: d) else { return }
+        results = Dictionary(uniqueKeysWithValues: keyed.compactMap { k, v in Int(k).map { ($0, v) } })
+    }
+
+    private func restart() {
+        tester.stop()
+        idx = 0
+        results = [:]
+        saveResults()
+        clearStep()
+    }
+
+    private func clearStep() {
+        tester.heard = ""; tester.result = ""; tester.error = ""
+        tester.diagnostic = ""; tester.diagnosticLevel = ""
     }
 
     private func step(_ d: Int) {
         recordResult()
         tester.stop()
         idx = max(0, min(tester.suite.count - 1, idx + d))
-        tester.heard = ""; tester.result = ""; tester.error = ""
-        tester.diagnostic = ""; tester.diagnosticLevel = ""
+        clearStep()
     }
 
     private var summaryHeader: String {
