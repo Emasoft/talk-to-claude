@@ -102,6 +102,19 @@ PREFIX_CASES = [
     ("region concatenates siblings",
      "command start number start one number stop caps start spell start al em er "
      "spell stop caps stop command stop", "1LMR"),
+    # ── the user's authoritative examples, verbatim transcripts ──
+    # punctuation acts inside spelling: "dot" → "." (caps over spell over dots)
+    ("U.S.A via caps+spell+dots",
+     "command caps start spell start u dot es dot ae spell stop caps stop", "U.S.A"),
+    # COMMAND takes ONE argument: NUMBER(one) is consumed; the trailing CAPS(SPELL(…))
+    # block is a SECOND argument, so it (and everything after) stays literal.
+    ("only the first argument is a command (no region)",
+     "command number start one number stop caps start spell start al al am spell stop caps stop",
+     "1 caps start spell start al al am spell stop caps stop"),
+    # the same blocks wrapped in a region → both arguments execute: 1 + LLM
+    ("a region executes every argument",
+     "command start number start one number stop caps start spell start al al am "
+     "spell stop caps stop command stop", "1LLM"),
 ]
 
 

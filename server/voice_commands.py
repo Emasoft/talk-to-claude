@@ -242,7 +242,10 @@ _CLOSERS = {")", "]", "}"}
 
 # In spelling mode only these command kinds still apply; everything else becomes a
 # letter (you're spelling a word, so "slash" etc. shouldn't be interpreted).
-_SPELL_OK = {"spell_off", "key", "case", "case_once"}
+# Kinds that still ACT inside spelling: end-spell, keys (Enter/Tab/…), case toggles,
+# and punctuation symbols ("dot"→"." while spelling "u dot es" → "U.S"). Everything
+# else becomes a letter via SPELL_MAP.
+_SPELL_OK = {"spell_off", "key", "case", "case_once", "char"}
 _SPACE_WORDS = {"space", "spazio", "spacebar"}
 
 # Spoken letter names -> letters (English + Italian + common ASR mishearings).
@@ -250,7 +253,7 @@ _SPACE_WORDS = {"space", "spazio", "spacebar"}
 # er"); this maps them back. Unknown tokens pass through unchanged (so an
 # already-merged "cat" stays "cat").
 SPELL_MAP = {
-    "a": "a", "ay": "a", "eh": "a",
+    "a": "a", "ay": "a", "eh": "a", "ae": "a",
     "b": "b", "bee": "b", "be": "b", "bi": "b",
     "c": "c", "see": "c", "cee": "c", "ci": "c", "si": "c",
     "d": "d", "dee": "d", "di": "d",
@@ -262,7 +265,7 @@ SPELL_MAP = {
     "j": "j", "jay": "j",
     "k": "k", "kay": "k", "kappa": "k",
     "l": "l", "el": "l", "ell": "l", "al": "l", "elle": "l",
-    "m": "m", "em": "m", "emme": "m",
+    "m": "m", "em": "m", "am": "m", "emme": "m",
     "n": "n", "en": "n", "enne": "n",
     "o": "o", "oh": "o",
     "p": "p", "pee": "p", "pi": "p",
