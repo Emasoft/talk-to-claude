@@ -31,7 +31,9 @@ final class AppSettings: ObservableObject {
     /// it's the primary interaction model; turn it off for legacy command-by-default.
     @Published var prefixMode: Bool { didSet { store.set(prefixMode, forKey: "prefixMode") } }
     /// Run a small local LLM over each transcription before injecting it, fixing
-    /// mis-heard technical terms / homophones / accent errors (~0.4s/utterance).
+    /// mis-heard technical terms / homophones / accent errors (~0.6s/utterance).
+    /// OPT-IN (default off): on disfluent/command speech the LLM can rewrite/hallucinate,
+    /// so it's gated and off by default — turn it on only for prose-heavy dictation.
     @Published var correct: Bool { didSet { store.set(correct, forKey: "correct") } }
 
     init() {
@@ -44,7 +46,7 @@ final class AppSettings: ObservableObject {
         pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
         autoSend = store.object(forKey: "autoSend") as? Bool ?? false
         prefixMode = store.object(forKey: "prefixMode") as? Bool ?? true
-        correct = store.object(forKey: "correct") as? Bool ?? true
+        correct = store.object(forKey: "correct") as? Bool ?? false
     }
 
     /// Port parsed to an Int, falling back to the default if the field is junk.

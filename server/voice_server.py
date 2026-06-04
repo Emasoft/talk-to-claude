@@ -94,7 +94,8 @@ PARAKEET = None   # loaded ParakeetTDT (on the ASR thread) when BACKEND == "para
 # off-indication→authentication) at ~0.4s/utterance without over-correcting clean
 # text. Runs on the same ASR thread as transcription (one MLX Metal stream).
 CORRECT_MODEL_ID = "mlx-community/gemma-3-4b-it-4bit"   # bilingual EN+IT (verified), ~0.6s
-CORRECT_ENABLED = True   # server default; --no-correct disables, app toggles per-connection
+CORRECT_ENABLED = False  # OPT-IN: a small LLM rewriting disfluent/command speech hallucinates
+                         # (—it's safe only with the word-overlap gate in correct_text). --correct enables.
 CORRECT_VOCAB = ""       # optional known-terms hint (--correct-vocab "Stripe, tmux, MLX")
 CORRECTOR = None         # (model, tokenizer) loaded lazily on the ASR thread
 _CORRECT_SAMPLER = None
@@ -858,6 +859,15 @@ def correct_text(raw: str) -> str:
     # Safety net: empty or wildly-longer output means the model misbehaved — keep raw.
     if not out or len(out) > len(raw) * 2 + 40:
         return raw
+    # Anti-hallucination gate: a correction should FIX words, not invent a new sentence.
+    # If fewer than half the output words were present in the raw input, the model
+    # rewrote/hallucinated (e.g. "command stop" -> "you can use a workflow") — keep raw.
+    raw_words = set(raw.lower().split())
+    out_words = out.lower().split()
+    if out_words:
+        kept = sum(1 for w in out_words if w in raw_words)
+        if kept / len(out_words) < 0.5:
+            return raw
     return out
 
 
@@ -1052,10 +1062,13 @@ async def handle_stream(request):
                     if text and correct:
                         # Fix ASR mis-transcriptions before command interpretation +
                         # injection. Best-effort: on failure keep the raw text.
+                        raw_text = text
                         try:
                             text = await loop.run_in_executor(ASR_EXECUTOR, correct_text, text)
                         except Exception as e:  # noqa: BLE001
                             print(f"[stream] correction failed (using raw): {e}", file=sys.stderr)
+                        if text != raw_text:
+                            print(f"[stream] corrected: {raw_text!r} -> {text!r}", file=sys.stderr)
                     if text:
                         before = _snapshot_modes(modes)   # for change-detect + rollback
                         actions = interpret(text, modes, prefix_mode=prefix_mode)
