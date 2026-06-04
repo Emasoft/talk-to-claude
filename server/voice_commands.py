@@ -336,11 +336,18 @@ _MODE_WORDS = {
     "number": "number", "numbers": "number", "numero": "number", "numeri": "number",
     "delete": "delete", "cancella": "delete",
     "replace": "replace", "sostituzione": "replace", "sostituisci": "replace",
+    # List modes: each "command enter" inside makes a new row; nesting indents one
+    # level. bullet = "- " markers; bulletnum = "1." / nested "2.1." numbering.
+    "bullet": "bullet", "bullets": "bullet",
+    "bulletnum": "bulletnum", "ordered": "bulletnum", "numbered": "bulletnum",
 }
 # The poppable modes. caps is an ambient MODIFIER (uppercases) that nests over a
-# content mode; spell/number/delete/replace decide what a content word becomes.
-# A "<MODE> stop" pops whichever of these is innermost in the scope stack.
-_MODE_TAGS = {"caps", "spell", "number", "delete", "replace"}
+# content mode; spell/number/delete/replace decide what a content word becomes;
+# bullet/bulletnum drive auto-indented list rows. A "<MODE> stop" pops whichever
+# of these is innermost in the scope stack.
+_MODE_TAGS = {"caps", "spell", "number", "delete", "replace", "bullet", "bulletnum"}
+_LIST_TAGS = {"bullet", "bulletnum"}
+_LIST_INDENT = "    "  # 4 spaces per nesting level
 
 # Words that, when an utterance OPENS with them right after a thinking pause,
 # signal a continuation of the previous fragment rather than a new sentence — so
@@ -461,6 +468,12 @@ def interpret(transcript: str, modes: dict | None = None,
     #   'once' — a single-argument COMMAND, auto-popped when its one block completes
     #   <mode> — caps | spell | number | delete | replace  (a START…STOP block)
     stack: list[str] = list(modes.get("scope_stack", []))
+    # Open list frames (one per nested bullet/bulletnum), innermost last. Each:
+    #   {"type": "bullet"|"bulletnum", "count": <items so far>, "prefix": "<parent num>"}
+    # pending_item = a new row is queued; its marker is emitted when content arrives
+    # (lazy, so a nested "<list> start" between rows can change the indent first).
+    bullets: list[dict] = [dict(f) for f in modes.get("bullets", [])]
+    pending_item = bool(modes.get("pending_item", False))
 
     # ── editable-line state (persists until Enter is pressed) ────────────────
     line = modes.get("line", "")            # exact on-screen text since last Enter
@@ -649,7 +662,7 @@ def interpret(transcript: str, modes: dict | None = None,
             next_glue = False
 
     def enter_mode(tag: str):
-        nonlocal case_mode, spelling, num_region, edit_mode, target, repl
+        nonlocal case_mode, spelling, num_region, edit_mode, target, repl, pending_item
         if tag == "caps":
             case_mode = "upper"
         elif tag == "spell":
@@ -662,9 +675,19 @@ def interpret(transcript: str, modes: dict | None = None,
         elif tag == "replace":
             flush()
             edit_mode, target, repl = "replace_find", [], []
+        elif tag in _LIST_TAGS:
+            # A bulletnum nested in a bulletnum inherits the parent's CURRENT number as
+            # its prefix (parent item 2 -> children 2.1, 2.2); otherwise it restarts at 1.
+            parent = bullets[-1] if bullets else None
+            if tag == "bulletnum" and parent and parent["type"] == "bulletnum":
+                prefix = (parent["prefix"] + "." if parent["prefix"] else "") + str(parent["count"])
+            else:
+                prefix = ""
+            bullets.append({"type": tag, "count": 0, "prefix": prefix})
+            pending_item = True
 
     def exit_mode(tag: str):
-        nonlocal case_mode, spelling, num_region, edit_mode, target, repl
+        nonlocal case_mode, spelling, num_region, edit_mode, target, repl, pending_item
         if tag == "caps":
             case_mode = "none"
         elif tag == "spell":
@@ -677,6 +700,10 @@ def interpret(transcript: str, modes: dict | None = None,
         elif tag == "replace":
             do_replace(" ".join(target), " ".join(repl))
             edit_mode, target, repl = None, [], []
+        elif tag in _LIST_TAGS:
+            if bullets:
+                bullets.pop()
+            pending_item = bool(bullets)  # continue the parent list, or end the list
 
     def style(w: str) -> str:
         nonlocal cap_once
@@ -689,13 +716,41 @@ def interpret(transcript: str, modes: dict | None = None,
             return w[:1].upper() + w[1:]
         return w
 
+    def maybe_list_marker():
+        # Lazily emit the next row's marker (a newline if needed, the indent, then the
+        # "- " / "N. " marker) the MOMENT real content arrives — so a "<list> start"
+        # between rows can deepen the indent first, and a trailing "command enter" right
+        # before STOP never leaves an empty row.
+        nonlocal pending_item, line, next_glue, need_sep
+        if not (bullets and pending_item):
+            return
+        pending_item = False
+        flush()                                   # commit any queued text to `line` first
+        fr = bullets[-1]
+        marker = "" if (not line or line.endswith("\n")) else "\n"
+        marker += _LIST_INDENT * (len(bullets) - 1)
+        if fr["type"] == "bulletnum":
+            fr["count"] += 1
+            num = (fr["prefix"] + "." if fr["prefix"] else "") + str(fr["count"])
+            marker += num + ". "
+        else:
+            marker += "- "
+        actions.append(("type", marker))
+        undo.append(line)
+        redo.clear()
+        line += marker
+        need_sep = False                          # the marker controls spacing, not flush()
+        next_glue = True                          # the content word attaches to the marker
+
     def emit_symbol(ch: str):
         nonlocal next_glue
+        maybe_list_marker()
         buf.append((ch, True))
         next_glue = ch not in _CLOSERS
 
     def emit_word(w: str):
         nonlocal next_glue, pending_close
+        maybe_list_marker()
         buf.append((style(w), next_glue))
         next_glue = False
         if pending_close is not None:
@@ -705,6 +760,7 @@ def interpret(transcript: str, modes: dict | None = None,
 
     def emit_letter(ch: str):
         nonlocal next_glue, cap_once
+        maybe_list_marker()
         if case_mode == "upper":
             ch = ch.upper()
         elif case_mode == "lower":
@@ -898,7 +954,11 @@ def interpret(transcript: str, modes: dict | None = None,
         elif kind == "key":
             flush()
             key = matched["key"]
-            if key == "BSpace" and line:
+            if bullets and key in ("Enter", "Newline"):
+                # Inside a list, "command enter" = NEXT ROW (a soft newline), never a
+                # submit. The row's marker is emitted lazily when its content arrives.
+                pending_item = True
+            elif key == "BSpace" and line:
                 # N backspaces == erase N chars; also keep the line buffer in sync so a
                 # following backword / delete still lines up with what's on screen.
                 cut = min(rep, len(line))
@@ -957,6 +1017,8 @@ def interpret(transcript: str, modes: dict | None = None,
     modes["scope_stack"] = stack
     modes["sym_mode"] = bool(stack)   # app "symbols" indicator: any command scope open
     modes["num_region"] = num_region
+    modes["bullets"] = bullets        # open list frames (persist across utterances)
+    modes["pending_item"] = pending_item
     modes["case_mode"] = case_mode
     modes["line"] = line
     modes["undo"] = undo

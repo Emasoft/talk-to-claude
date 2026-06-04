@@ -204,6 +204,30 @@ def main() -> int:
               f"split_mode_line={w3.get('line')!r}")
         failed += 1
 
+    # Bullet/bulletnum lists: "command enter" = a new row, nesting indents 4 spaces,
+    # bulletnum numbers hierarchically (2.1, then recursively 1.1.1). Auto-returns to
+    # the parent list on "<list> stop", and persists across utterances (VAD splits).
+    bl = {}
+    interpret("command bullet start alpha command enter beta command enter gamma "
+              "command enter bullet stop", bl, prefix_mode=True)
+    b_simple = bl.get("line") == "- alpha\n- beta\n- gamma"
+    bn = {}
+    interpret("command bulletnum start a command enter b command enter bulletnum start c "
+              "command enter d command enter bulletnum stop e command enter bulletnum stop",
+              bn, prefix_mode=True)
+    b_num = bn.get("line") == "1. a\n2. b\n    2.1. c\n    2.2. d\n3. e"
+    bs = {}
+    for _u in ["command bullet start a", "command enter", "b", "command enter",
+               "bullet start", "c", "command enter", "d", "bullet stop",
+               "e", "command enter", "bullet stop"]:
+        interpret(_u, bs, prefix_mode=True)   # the SAME list, split word-by-word by the VAD
+    b_split = bs.get("line") == "- a\n- b\n    - c\n    - d\n- e"
+    ok_bullets = b_simple and b_num and b_split
+    print(f"bullet/bulletnum lists (nested + word-by-word): {'PASS' if ok_bullets else 'FAIL'}")
+    if not ok_bullets:
+        print(f"  simple={bl.get('line')!r}\n  num={bn.get('line')!r}\n  split={bs.get('line')!r}")
+        failed += 1
+
     # Continuation merge: a thinking pause splits one sentence; the continuation
     # opens with a continuation word, so we strip Whisper's pause-"?" and lowercase
     # the opener, flowing the two fragments into one line.
