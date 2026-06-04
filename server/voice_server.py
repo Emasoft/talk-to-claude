@@ -79,6 +79,20 @@ ALLOWED_LANGS = {"en", "it"}   # Whisper-only: drop other-language noise halluci
 SAMPLE_RATE = 16000
 MAX_TEXT_LEN = 8000
 
+# Audio-health thresholds (RMS / peak on float32 [-1, 1]). A live mic in a silent
+# room still floats above _SILENCE_FLOOR on its noise floor; a dead/muted/wrong mic
+# sends essentially digital zero, which is how we tell "no mic" from "quiet room".
+_SILENCE_FLOOR = 0.0008    # below this, audio is digital silence (dead/muted/wrong mic)
+_FAINT_RMS = 0.025         # an utterance quieter than this is "faint" → boost + warn
+_VERY_FAINT_RMS = 0.006    # barely any voice — gain can't rescue it; warn hard
+_GAIN_TARGET_RMS = 0.06    # auto-gain normalizes faint speech up toward this
+_GAIN_MAX = 8.0            # cap so we don't blow up the noise floor
+
+
+def _loudness(audio) -> float:
+    """RMS of an utterance (float32 [-1,1]); 0 for empty."""
+    return float(np.sqrt(np.mean(audio * audio)) + 1e-12) if audio.size else 0.0
+
 # Optional Whisper initial_prompt to bias vocabulary (Whisper backend only).
 DEFAULT_CONTEXT = ""
 
@@ -1135,6 +1149,7 @@ async def handle_stream(request):
 
     seg = UtteranceSegmenter(sample_rate=sample_rate, silence_hold_sec=silence_hold)
     modes: dict = {}  # persistent caps/spell + editable-line state for this connection
+    mon_secs, mon_peak, dead_warned, noise_run = 0.0, 0.0, False, 0  # audio-health monitor
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate} "
@@ -1152,10 +1167,33 @@ async def handle_stream(request):
                 pcm = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
                 if pcm.size == 0:
                     continue
+                # ── audio health: dead/muted/wrong mic = digital silence over several
+                #    seconds (a live mic in a quiet room floats above the noise floor). ──
+                mon_secs += pcm.size / sample_rate
+                mon_peak = max(mon_peak, float(np.max(np.abs(pcm))))
+                if mon_secs >= 4.0:
+                    if mon_peak < _SILENCE_FLOOR and not dead_warned:
+                        await ws.send_json({"type": "diagnostic", "code": "no_audio", "level": "error",
+                            "message": "No sound is reaching the mic. Check the selected mic/earbuds, that "
+                                       "nothing covers the mic, and that you're speaking to THIS device."})
+                        dead_warned = True
+                    elif mon_peak >= _SILENCE_FLOOR:
+                        dead_warned = False
+                    mon_secs, mon_peak = 0.0, 0.0
                 events, utt = seg.feed(pcm)
                 for ev in events:
                     await ws.send_json({"type": ev})
                 if utt is not None:
+                    # ── audio health: AUTOFIX faint speech by normalizing its level, and warn ──
+                    rms = _loudness(utt)
+                    if 0 < rms < _FAINT_RMS:
+                        if rms >= _VERY_FAINT_RMS:
+                            utt = np.clip(utt * min(_GAIN_TARGET_RMS / rms, _GAIN_MAX), -1.0, 1.0)
+                            await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
+                                "message": "Your voice is faint — I boosted it, but move closer to the mic for best accuracy."})
+                        else:
+                            await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
+                                "message": "Barely any voice detected — move much closer to the mic and speak up."})
                     try:
                         text = await loop.run_in_executor(
                             ASR_EXECUTOR, transcribe_utterance, utt, context
@@ -1163,6 +1201,16 @@ async def handle_stream(request):
                     except Exception as e:  # noqa: BLE001 - report, don't drop the stream
                         await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
                         continue
+                    # ── audio health: the VAD fired (energy present) but the recognizer
+                    #    returned nothing → that was noise, not speech. 3 in a row = noisy. ──
+                    if not text:
+                        noise_run += 1
+                        if noise_run == 3:
+                            await ws.send_json({"type": "diagnostic", "code": "noisy", "level": "warn",
+                                "message": "Background noise is drowning your voice. Try noise-cancelling earbuds, "
+                                           "or turn on Voice Isolation (Control Center → Mic Mode)."})
+                    else:
+                        noise_run = 0
                     if text and correct:
                         # Fix ASR mis-transcriptions before command interpretation +
                         # injection. Best-effort: on failure keep the raw text.
