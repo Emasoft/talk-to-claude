@@ -22,17 +22,21 @@ iPhone/iPad (SwiftUI)  ──WebSocket(PCM16 16kHz)──►  Mac server (aiohtt
   noise, so the whisper path now DROPS any utterance whose detected language ∉ {en, it}.
 
 **LLM correction (`--correct`, default ON; per-connection `correct` config):** after ASR,
-a small local instruct model (`mlx-community/Qwen2.5-3B-Instruct-4bit` via `mlx-lm`) fixes
+a small local instruct model (`mlx-community/gemma-3-4b-it-4bit` via `mlx-lm`) fixes
 mis-transcriptions BEFORE injection — mis-heard technical/code terms, homophones, accent
 errors (the residual misses no acoustic model fixes: Parakeet's weak spot is accented
-English). Runs on the SAME ASR thread (one MLX stream), ~0.4s/utterance. The **few-shot
-prompt is load-bearing** — a bare prompt left the 3B too timid (missed `strap→Stripe`,
-`off-indication→authentication`); three few-shot pairs (`_CORRECT_SHOTS`) make it catch the
-hard phonetic mis-hearings while leaving correct text untouched (verified empirically; 7B
-matched it at 2× latency, not worth it). Safety: deterministic (temp 0), output capped at
-~4 tokens/word, and on empty/over-long output it FALLS BACK to raw — correction can never
-make things worse. `--correct-vocab "Stripe, tmux, MLX"` feeds known terms (free biasing).
-Toggle off live (app sends `correct:false`) or at startup (`--no-correct`).
+English). Runs on the SAME ASR thread (one MLX stream), ~0.6s/utterance. **Model choice was
+empirical, not benchmark-driven:** Gemma-3-4B-it beat Qwen2.5-3B (weak/distrusted Italian)
+and Ministral-8B (leaked the prompt prefix, 2× slower) on a real EN+IT correction set —
+Gemma fixed `stygmatice→stigmatize`, IT `autenti cazione→autenticazione`, `straip→Stripe`,
+and left clean text (EN+IT) untouched. The **few-shot prompt is load-bearing** — a bare
+prompt left models too timid (missed `strap→Stripe`, `off-indication→authentication`); four
+few-shot pairs (`_CORRECT_SHOTS`, incl. one ITALIAN) make it catch the hard phonetic
+mis-hearings in both languages. The system prompt pins "may be ENGLISH or ITALIAN — keep the
+SAME language". Safety: deterministic (temp 0), output capped at ~4 tokens/word, and on
+empty/over-long output it FALLS BACK to raw — correction can never make things worse.
+`--correct-vocab "Stripe, tmux, MLX"` feeds known terms (free biasing). Toggle off live (app
+sends `correct:false`) or at startup (`--no-correct`).
 
 ## Layout
 

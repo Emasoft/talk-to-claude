@@ -93,7 +93,7 @@ PARAKEET = None   # loaded ParakeetTDT (on the ASR thread) when BACKEND == "para
 # 3B + few-shot catches the hard phonetic mis-hearings (strap→Stripe,
 # off-indication→authentication) at ~0.4s/utterance without over-correcting clean
 # text. Runs on the same ASR thread as transcription (one MLX Metal stream).
-CORRECT_MODEL_ID = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+CORRECT_MODEL_ID = "mlx-community/gemma-3-4b-it-4bit"   # bilingual EN+IT (verified), ~0.6s
 CORRECT_ENABLED = True   # server default; --no-correct disables, app toggles per-connection
 CORRECT_VOCAB = ""       # optional known-terms hint (--correct-vocab "Stripe, tmux, MLX")
 CORRECTOR = None         # (model, tokenizer) loaded lazily on the ASR thread
@@ -805,20 +805,22 @@ def _transcribe_whisper(audio: np.ndarray, context: str) -> str:
 
 _CORRECT_SYSTEM = (
     "You correct speech-to-text errors in voice dictation about software development. "
-    "The recognizer mis-hears words, especially technical terms (libraries, APIs, "
-    "identifiers), proper nouns, and homophones. Replace each mis-heard word with the word "
-    "MOST LIKELY actually spoken, judged by how similar they SOUND, using any known terms "
-    "given. Preserve wording, meaning, length, and intent. Do NOT paraphrase, answer, "
-    "translate, or comment. If already correct, return it verbatim. Output ONLY the "
-    "corrected text."
+    "The dictation may be in ENGLISH or ITALIAN. The recognizer mis-hears words, especially "
+    "technical terms (libraries, APIs, identifiers), proper nouns, and homophones. Replace "
+    "each mis-heard word with the word MOST LIKELY actually spoken, judged by how similar "
+    "they SOUND, using any known terms given. Keep the SAME language as the input. Preserve "
+    "wording, meaning, length, and intent. Do NOT paraphrase, answer, translate, or comment. "
+    "If already correct, return it verbatim. Output ONLY the corrected text."
 )
-# Few-shot pairs — these are what make a 3B model fix the HARD phonetic mis-hearings
-# (and NOT over-correct already-correct text). Verified empirically before shipping.
+# Few-shot pairs — these are what make the model fix the HARD phonetic mis-hearings (and NOT
+# over-correct already-correct text), in BOTH languages. Verified empirically before shipping.
 _CORRECT_SHOTS = (
     ("Known terms: Stripe\nTranscription: replace the fake strap test",
      "replace the fake Stripe test"),
     ("Transcription: I need to right the off indication module",
      "I need to write the authentication module"),
+    ("Transcription: puoi sistemare il bag nel codice",
+     "puoi sistemare il bug nel codice"),
     ("Transcription: Is there a better way to solve this?",
      "Is there a better way to solve this?"),
 )
