@@ -223,14 +223,11 @@ struct CommandTestView: View {
             .padding()
         }
         .navigationTitle("Command self-test")
-        .navigationBarBackButtonHidden(true)
-        .interactiveDismissDisabled(tester.recording)   // a swipe-down can't kill a running test
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button {
+            ToolbarItem(placement: .cancellationAction) {
+                // The ONLY way out of the full-screen cover — confirms if a test is running.
+                Button("Close") {
                     if tester.recording { confirmInterrupt = true } else { dismiss() }
-                } label: {
-                    Label("Settings", systemImage: "chevron.backward")
                 }
             }
             ToolbarItem(placement: .primaryAction) {

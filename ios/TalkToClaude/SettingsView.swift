@@ -6,6 +6,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var testing = false
+    @State private var showCommandTest = false
 
     var body: some View {
         NavigationStack {
@@ -93,8 +94,10 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    NavigationLink {
-                        CommandTestView(settings: settings)
+                    // Full-screen cover (not a pushed page) so a tap outside / swipe can't
+                    // interrupt a running test — the only exit is the test's own Close button.
+                    Button {
+                        showCommandTest = true
                     } label: {
                         Label("Command self-test", systemImage: "waveform.badge.mic")
                     }
@@ -115,6 +118,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .fullScreenCover(isPresented: $showCommandTest) {
+                NavigationStack { CommandTestView(settings: settings) }
             }
         }
     }
