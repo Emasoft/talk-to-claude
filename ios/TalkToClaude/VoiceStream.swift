@@ -25,6 +25,8 @@ final class VoiceStream: ObservableObject {
     // is benign — a stale reference just sends to a closing socket, which is a
     // no-op. nonisolated(unsafe) documents that we accept this.
     private nonisolated(unsafe) var liveTask: URLSessionWebSocketTask?
+    private var wantListening = false   // user intent — drives auto-reconnect on a drop
+    private var reconnectAttempts = 0
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -40,6 +42,14 @@ final class VoiceStream: ObservableObject {
     }
 
     func start(session: String) {
+        wantListening = true
+        reconnectAttempts = 0
+        finals.removeAll()
+        connect(session: session)
+    }
+
+    /// Open the socket and send the config. Reused by start() and by auto-reconnect.
+    private func connect(session: String) {
         guard task == nil else { return }
         guard let url = URL(string: "ws://\(settings.macIP):\(settings.portNumber)/stream") else {
             lastError = "Bad server URL"
@@ -48,10 +58,9 @@ final class VoiceStream: ObservableObject {
         let t = urlSession.webSocketTask(with: url)
         task = t
         liveTask = t
-        finals.removeAll()
         lastError = ""
         listening = true
-        status = "Connecting…"
+        status = reconnectAttempts == 0 ? "Connecting…" : "Reconnecting…"
         t.resume()
 
         // First frame: the JSON config — token + target session + voice tunables.
@@ -75,6 +84,8 @@ final class VoiceStream: ObservableObject {
     }
 
     func stop() {
+        wantListening = false       // user-initiated — do NOT auto-reconnect
+        reconnectAttempts = 0
         listening = false
         speaking = false
         connected = false
@@ -118,16 +129,40 @@ final class VoiceStream: ObservableObject {
                     Task { @MainActor in self.handle(text) }
                 }
                 Task { @MainActor in self.receiveLoop() }  // re-arm on the main actor
-            case .failure(let error):
+            case .failure:
                 Task { @MainActor in
                     self.connected = false
-                    if self.listening {
-                        self.status = "Disconnected — tap the mic to retry"
-                        self.lastError = error.localizedDescription
-                        self.listening = false
+                    self.task = nil
+                    self.liveTask = nil
+                    if self.wantListening {
+                        self.scheduleReconnect()   // a drop (server restart / blip) — auto-retry
+                    } else {
+                        self.listening = false     // user already stopped — stay down
                     }
                 }
             }
+        }
+    }
+
+    /// A dropped socket (server restart, network blip, idle close) auto-reconnects with
+    /// backoff while the user still wants to listen — so transient drops are an invisible
+    /// "Reconnecting…" instead of a dead-end red error. Gives up after a handful of tries.
+    private func scheduleReconnect() {
+        guard wantListening else { return }
+        reconnectAttempts += 1
+        if reconnectAttempts > 8 {
+            listening = false
+            wantListening = false
+            status = "Disconnected — tap the mic to retry"
+            lastError = "Lost the connection to the Mac and couldn't reconnect — is the server running?"
+            return
+        }
+        status = "Reconnecting…"
+        let delay = min(0.4 * Double(reconnectAttempts), 3.0)   // 0.4s → 3s backoff
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard self.wantListening, self.task == nil else { return }
+            self.connect(session: self.settings.session)
         }
     }
 
@@ -138,6 +173,8 @@ final class VoiceStream: ObservableObject {
         switch type {
         case "ready":
             connected = true
+            reconnectAttempts = 0   // a successful (re)connect clears the backoff + any error
+            lastError = ""
             status = "Listening…"
         case "speech_start":
             speaking = true
