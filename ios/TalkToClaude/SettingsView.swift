@@ -93,6 +93,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        CommandTestView(settings: settings)
+                    } label: {
+                        Label("Command self-test", systemImage: "waveform.badge.mic")
+                    }
+                } header: {
+                    Text("Diagnostics")
+                } footer: {
+                    Text("Read a fixed phrase aloud; see exactly what the model heard and whether the command was recognized. Nothing is sent to Claude.")
+                }
+
+                Section {
                     Text("Your voice is streamed to the Mac over Tailscale's encrypted tunnel and transcribed there by a local AI model (Parakeet), optionally cleaned up by a local LLM — nothing leaves your network. The Mac detects speech pauses automatically, so just talk; no need to tap send.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
