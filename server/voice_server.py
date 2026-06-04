@@ -94,9 +94,11 @@ DEFAULT_CONTEXT = ""
 # it capitalise. A lowercase space-separated list biases the vocabulary without
 # dragging punctuation or capitals into the transcription.
 COMMAND_CONTEXT = (
-    "terminal voice commands you may hear: command start stop caps spell number "
-    "delete replace backword undo redo slash dot dash colon enter backspace space "
-    "tab escape question mark"
+    "terminal voice commands you may hear: command on off start stop caps spell number "
+    "numbered ordered bullet bulletnum delete replace backword undo redo slash dot dash "
+    "colon semicolon enter backspace space tab escape quotes apostrophe backtick triple "
+    "parentheses bracket brace hash heading bold italic at pipe dollar percent ampersand "
+    "question mark"
 )
 
 # Populated in main().
