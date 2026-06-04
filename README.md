@@ -25,6 +25,9 @@ CLI session running in **tmux**. Nothing leaves your Tailscale network.
 |------|------------|
 | `ios/TalkToClaude/` | SwiftUI app sources |
 | `ios/project.rb` | Generates `TalkToClaude.xcodeproj` (uses the `xcodeproj` gem) |
+| `ios/appicon.py` | Regenerates the 1024×1024 app icon (`uv run --with pillow python ios/appicon.py`) |
+| `docs/APP-STORE.md` | Step-by-step App Store submission guide + ready-to-paste listing metadata |
+| `PRIVACY.md` | Privacy policy (host it publicly; App Store needs the URL) |
 | `server/voice_server.py` | Mac receiver — WebSocket audio in, VAD + Whisper, tmux inject |
 | `server/voice_commands.py` | Bilingual (EN/IT) verbal-command interpreter + unit tests target |
 | `server/test_voice_commands.py` | `python test_voice_commands.py` — interpreter tests |
@@ -84,6 +87,16 @@ target session, the **pause threshold**, and **auto-send**.
   with `start delete mode <words> stop delete mode` /
   `start replace mode <find> replace with <new> stop replace mode`, plus
   `undo` / `redo`. Editing works until you press Enter.
+
+## Publishing to the App Store
+
+The app is configured for release: universal (iPhone + iPad), bundle ID
+`com.emasoft.talktoclaude`, signing team `P2V8DD7FNW`, and a 1024×1024 app icon
+wired into the asset catalog. The full walkthrough — App Store Connect setup,
+ready-to-paste listing copy, the privacy "nutrition label" answers, archive &
+upload commands, and the review-risk notes (this is a *companion* app for a Mac
+server you host, which needs careful review notes) — lives in
+[`docs/APP-STORE.md`](docs/APP-STORE.md). Privacy policy: [`PRIVACY.md`](PRIVACY.md).
 
 ## Security
 
