@@ -35,6 +35,8 @@ final class CommandTester: ObservableObject {
     @Published var heard = ""     // raw ASR — exactly what Whisper transcribed
     @Published var result = ""    // net interpreted line — what would land in Claude
     @Published var error = ""
+    @Published var diagnostic = ""        // audio-health hint from the server (low/noisy/no-audio)
+    @Published var diagnosticLevel = ""   // "warn" | "error"
     @Published fileprivate var suite: [TestPhrase] = FALLBACK_SUITE
 
     private let settings: AppSettings
@@ -65,7 +67,7 @@ final class CommandTester: ObservableObject {
     /// Reset captured text and open a fresh dry-run stream, then start the mic.
     func start() {
         guard task == nil else { return }
-        heard = ""; result = ""; error = ""
+        heard = ""; result = ""; error = ""; diagnostic = ""; diagnosticLevel = ""
         guard let url = URL(string: "ws://\(settings.macIP):\(settings.portNumber)/stream") else {
             error = "Bad server URL"; return
         }
@@ -127,6 +129,9 @@ final class CommandTester: ObservableObject {
             if let line = o["line"] as? String { result = line }   // net text so far
         } else if type == "error" {
             error = (o["error"] as? String) ?? "server error"
+        } else if type == "diagnostic" {
+            diagnostic = (o["message"] as? String) ?? ""
+            diagnosticLevel = (o["level"] as? String) ?? "warn"
         }
     }
 }
@@ -135,6 +140,8 @@ struct CommandTestView: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var tester: CommandTester
     @State private var idx = 0
+    @State private var results: [Int: Bool] = [:]   // phrase index → passed (latest attempt)
+    @State private var showSummary = false
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -186,12 +193,23 @@ struct CommandTestView: View {
                         .foregroundStyle(passed ? .green : .red)
                     }
 
+                    if !tester.diagnostic.isEmpty {
+                        Label(tester.diagnostic,
+                              systemImage: tester.diagnosticLevel == "error"
+                                  ? "exclamationmark.triangle.fill" : "waveform.badge.exclamationmark")
+                            .font(.caption)
+                            .foregroundStyle(tester.diagnosticLevel == "error" ? .red : .orange)
+                    }
+
                     if !tester.error.isEmpty {
                         Text(tester.error).font(.caption).foregroundStyle(.red)
                     }
 
                     HStack {
                         Button("Previous") { step(-1) }.disabled(idx == 0)
+                        Spacer()
+                        Text("✓ \(results.values.filter { $0 }.count) / \(results.count) tested")
+                            .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button("Next phrase") { step(1) }.disabled(idx >= tester.suite.count - 1)
                     }
@@ -201,14 +219,73 @@ struct CommandTestView: View {
             .padding()
         }
         .navigationTitle("Command self-test")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Summary") { recordResult(); showSummary = true }
+            }
+        }
+        .sheet(isPresented: $showSummary) { summaryView }
         .task { await tester.loadSuite() }
+        .onChange(of: tester.recording) { _, rec in if !rec { recordResult() } }
+        .onChange(of: tester.result) { _, _ in if !tester.recording { recordResult() } }
         .onDisappear { tester.stop() }
     }
 
+    private func recordResult() {
+        guard let c = current, hasResult else { return }
+        results[idx] = (tester.result == c.expect)
+    }
+
     private func step(_ d: Int) {
+        recordResult()
         tester.stop()
         idx = max(0, min(tester.suite.count - 1, idx + d))
         tester.heard = ""; tester.result = ""; tester.error = ""
+        tester.diagnostic = ""; tester.diagnosticLevel = ""
+    }
+
+    private var summaryHeader: String {
+        let p = results.values.filter { $0 }.count
+        return "\(p) / \(results.count) passed"
+    }
+
+    private var summaryView: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(summaryHeader).font(.title3).bold()
+                    let untested = tester.suite.count - results.count
+                    if untested > 0 {
+                        Text("\(untested) not yet tested").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Section("Per phrase") {
+                    ForEach(Array(tester.suite.enumerated()), id: \.offset) { i, ph in
+                        summaryRow(i, ph)
+                    }
+                }
+            }
+            .navigationTitle("Test summary")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { showSummary = false } }
+            }
+        }
+    }
+
+    private func summaryRow(_ i: Int, _ ph: TestPhrase) -> some View {
+        let r: Bool? = results[i]
+        let icon = r == nil ? "circle.dashed" : (r! ? "checkmark.circle.fill" : "xmark.circle.fill")
+        let color: Color = r == nil ? .secondary : (r! ? .green : .red)
+        return HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ph.note).font(.callout)
+                if r == false {
+                    Text("expected: \(ph.expect)")
+                        .font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+            }
+        }
     }
 
     private func resultRow(_ label: String, _ value: String) -> some View {
