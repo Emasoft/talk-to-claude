@@ -7,6 +7,7 @@ struct SettingsView: View {
 
     @State private var testing = false
     @State private var showCommandTest = false
+    @State private var showInstall = false
 
     var body: some View {
         NavigationStack {
@@ -47,6 +48,18 @@ struct SettingsView: View {
                     if !claude.lastError.isEmpty {
                         Text(claude.lastError).font(.caption).foregroundStyle(.red)
                     }
+                }
+
+                Section {
+                    Button {
+                        showInstall = true
+                    } label: {
+                        Label("Install the ASR for free on your Mac", systemImage: "arrow.down.circle")
+                    }
+                } header: {
+                    Text("Mac server")
+                } footer: {
+                    Text("One command sets up the free, open-source speech server on your Mac — it's free now and always.")
                 }
 
                 Section {
@@ -122,6 +135,7 @@ struct SettingsView: View {
             .fullScreenCover(isPresented: $showCommandTest) {
                 NavigationStack { CommandTestView(settings: settings) }
             }
+            .sheet(isPresented: $showInstall) { InstallServerView() }
         }
     }
 }

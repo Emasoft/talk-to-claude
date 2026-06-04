@@ -49,6 +49,14 @@ build number not previously used for that version).
 
 ---
 
+## Pricing — Free
+
+In App Store Connect → your app → **Pricing and Availability**, set the price to
+**Free**. Do **not** configure any in-app purchases or subscriptions — the app is
+free with no paid tiers, now and always. Confirm the **In-App Purchases** section
+is empty before submitting, and select **all territories** for worldwide
+availability.
+
 ## Listing metadata (ready to paste)
 
 All within Apple's character limits.
@@ -263,6 +271,7 @@ submitting for review.
 ```
 □ Bundle ID com.emasoft.talktoclaude registered in Developer portal
 □ App record created in App Store Connect (name available)
+□ Price set to Free; NO in-app purchases / subscriptions; all territories selected
 □ MARKETING_VERSION / CURRENT_PROJECT_VERSION bumped (unique build number)
 □ App icon present (1024×1024, opaque)            ✅ done — ios/appicon.py
 □ Listing metadata pasted (name/subtitle/desc/keywords/category/age)

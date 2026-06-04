@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showSearch = false
     @State private var showSessions = true   // collapsible Claude-session column
     @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
+    @AppStorage("didCompleteOnboarding") private var didOnboard = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var hSize
 
@@ -44,6 +45,13 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) { SettingsView(settings: settings, claude: claude) }
         .sheet(isPresented: $showSearch) { CheatSheetView(groups: voice.cheatGroups) }
+        // First launch: explain the free Mac companion server and how to install it.
+        .fullScreenCover(isPresented: Binding(
+            get: { !didOnboard },
+            set: { presented in if !presented { didOnboard = true } }
+        )) {
+            OnboardingView { didOnboard = true }
+        }
         .onAppear { AVAudioApplication.requestRecordPermission { _ in } }
         .task {
             // Keep the Claude-session sidebar fresh while the app is foreground.
