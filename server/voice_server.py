@@ -82,20 +82,21 @@ MAX_TEXT_LEN = 8000
 # Optional Whisper initial_prompt to bias vocabulary (Whisper backend only).
 DEFAULT_CONTEXT = ""
 
-# In prefix mode, prime Whisper with the command vocabulary so it transcribes the
-# keywords correctly — "start" (not "third"), "command" (not "come and"), "number",
-# "caps", "stop" — instead of their phonetic neighbours. initial_prompt biases the
-# decoder toward this text; the example phrases bias the n-grams ("number start",
-# "caps stop") the grammar depends on.
+# In prefix mode, give Whisper a LIGHT vocabulary hint so it leans toward the command
+# keywords ("start" not "third") instead of their phonetic neighbours. Keep it to a
+# single mention of each word: an earlier version repeated "command … start … stop"
+# in example phrases and Whisper began HALLUCINATING "command" everywhere (turning
+# "test"/"hello" into "command") and even looping tokens. One mention each is enough
+# to bias recognition without over-priming.
+# NB: keep this prompt LOWERCASE and COMMA-FREE. Whisper copies the prompt's
+# punctuation/casing style into its output — a comma-separated list made it sprinkle
+# commas between every spoken word ("deploy" -> "deploy,"), and capitalised words made
+# it capitalise. A lowercase space-separated list biases the vocabulary without
+# dragging punctuation or capitals into the transcription.
 COMMAND_CONTEXT = (
-    "Voice editing commands for a terminal. Keywords: command, start, stop, caps, "
-    "spell, number, delete, replace, backword, undo, redo, slash, dot, comma, colon, "
-    "dash, enter, backspace, space, tab, escape, up, down. "
-    "Typical phrases: command enter. command backspace. command slash. "
-    "command start backspace three times command stop. "
-    "command caps start deploy now caps stop. "
-    "command number start one two three number stop. "
-    "command spell start a b c spell stop. command backword two."
+    "terminal voice commands you may hear: command start stop caps spell number "
+    "delete replace backword undo redo slash dot dash colon enter backspace space "
+    "tab escape question mark"
 )
 
 # Populated in main().
@@ -947,6 +948,30 @@ COMMAND_TEST_PHRASES = [
      "region: NUMBER then CAPS concatenated"),
     ("command number start four five number stop caps start hi caps stop",
      "one argument: only NUMBER is a command, the rest is literal"),
+    # ── real-world dictation: URLs, code, markdown ──
+    ("https command colon command slash command slash github command dot com",
+     "URL: https://github.com"),
+    ("command open quotes hello world command close quotes", "double-quoted string"),
+    ("command open parentheses foo command close parentheses", "parentheses"),
+    ("command backtick npm install command backtick", "inline code (backticks)"),
+    ("command triple backticks", "triple backticks (code fence open)"),
+    ("command code block python", "fenced code block with language"),
+    ("command hash", "hash / pound sign"),
+    ("command heading two introduction", "markdown H2 heading"),
+    ("command bullet first item", "markdown bullet"),
+    ("command bold important", "markdown bold"),
+    ("command numbered item buy milk", "numbered list item"),
+    ("command quote block note", "markdown blockquote"),
+    ("command start pipe ampersand percent command stop", "region of raw symbols"),
+    # ── nested lists (auto-indent + auto-numbering) ──
+    ("command bullet start alpha command enter beta command enter gamma command enter bullet stop",
+     "bulleted list, 3 rows"),
+    ("command bullet start a command enter b command enter bullet start c command enter d "
+     "command enter bullet stop e command enter bullet stop",
+     "bulleted list with an indented sub-list"),
+    ("command bulletnum start a command enter b command enter bulletnum start c command enter d "
+     "command enter bulletnum stop e command enter bulletnum stop",
+     "numbered list with nested numbering (2.1, 2.2)"),
 ]
 
 
