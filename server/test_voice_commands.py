@@ -175,6 +175,35 @@ def main() -> int:
     if not retro:
         failed += 1
 
+    # WORD-BY-WORD tolerance: the VAD splits each word into its own utterance AND the
+    # ASR splits the trigger into "command" + "come and". The filler tail is swallowed
+    # (typed: nothing) and the arm survives, so a later "start" still opens the region,
+    # and a split "command" + "stop" still closes it.
+    w = {}
+    s1 = render(interpret("command", w, prefix_mode=True))      # provisional "command"
+    s2 = render(interpret("come and", w, prefix_mode=True))     # filler tail → swallowed
+    s3 = render(interpret("start", w, prefix_mode=True))        # completes → open region
+    s4 = render(interpret("slash", w, prefix_mode=True))        # inside region → a command fires
+    s5 = render(interpret("command", w, prefix_mode=True))      # provisional " command" (space before, line="/")
+    s6 = render(interpret("stop", w, prefix_mode=True))         # split close → erase the 8-char provisional, region closes
+    wbw = (s1 == "command" and s2 == "" and s3 == "⌫7"
+           and s4 == "/" and s5 == " command" and s6 == "⌫8")
+    # "commande" (the ASR's frequent spelling of the trigger) also arms
+    w2 = {}
+    interpret("commande", w2, prefix_mode=True)
+    wbw = wbw and (render(interpret("enter", w2, prefix_mode=True)) == "⌫8⟨Enter⟩")
+    # Split AFTER the mode word — the real phrase-2 failure: "command caps" | "start deploy
+    # caps stop" must reconstruct "command caps start …" and yield the net line "DEPLOY".
+    w3 = {}
+    interpret("command caps", w3, prefix_mode=True)                 # arm pending mode = caps
+    interpret("start deploy caps stop", w3, prefix_mode=True)       # reconstruct → uppercases content
+    wbw = wbw and (w3.get("line") == "DEPLOY")
+    print(f"word-by-word command (split trigger + filler tail): {'PASS' if wbw else 'FAIL'}")
+    if not wbw:
+        print(f"  got: s1={s1!r} s2={s2!r} s3={s3!r} s4={s4!r} s5={s5!r} s6={s6!r} "
+              f"split_mode_line={w3.get('line')!r}")
+        failed += 1
+
     # Continuation merge: a thinking pause splits one sentence; the continuation
     # opens with a continuation word, so we strip Whisper's pause-"?" and lowercase
     # the opener, flowing the two fragments into one line.

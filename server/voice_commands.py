@@ -317,9 +317,14 @@ _MAXW = max(len(p.split()) for p in _PHRASES)
 # STOP pops the innermost open mode (LIFO). A bare STOP with nothing open is literal.
 # The prefix only "arms" when a real command follows it, so "run this command" still
 # prints literally (the lookahead gate).
-_PREFIX_WORDS = {"command", "commando", "commands", "comando", "comandi"}
+_PREFIX_WORDS = {"command", "commande", "commando", "commands", "comando", "comandi"}
 _START_WORDS = {"start", "begin", "inizio", "inizia"}
 _STOP_WORDS = {"stop", "end", "fine", "ferma", "basta", "termina"}
+# When the ASR splits the trigger across a pause it emits the tail of "command"
+# as its own little utterance ("command" → "command" + "come and"). If such an
+# utterance lands right after a provisional "command", it's NOT real text — it's
+# the trigger's tail. We swallow it and keep the prefix armed for the next word.
+_PREFIX_FILLER = {"come", "and", "on", "commander"}
 _TIMES_WORDS = {"times", "time", "volte", "volta"}
 
 # Modes that form a self-contained "command <MODE> start … <MODE> stop" unit: the
@@ -384,17 +389,26 @@ def _prefix_would_act(tokens: list[str]) -> bool:
     """True if prepending 'command' to this utterance would fire a command or open a
     scope — used for RETROACTIVE cross-utterance correction. When a lone 'command'
     was written provisionally in the previous utterance and THIS one starts with a
-    command word ('enter'), a 'start', or a '<mode> start', we delete the provisional
-    word and reinterpret as 'command <this utterance>'."""
+    command word ('enter'), a 'start'/'stop', or a '<mode> start/stop', we delete the
+    provisional word and reinterpret as 'command <this utterance>'. The STOP case
+    matters because the VAD also splits the CLOSING 'command stop' into two
+    utterances ('command' then 'stop')."""
     if not tokens:
         return False
     a = _norm(tokens[0])
     b = _norm(tokens[1]) if len(tokens) > 1 else ""
-    if a in _START_WORDS:                       # "command" | "start …"
+    if a in _START_WORDS or a in _STOP_WORDS:            # "command" | "start …" / "stop"
         return True
-    if a in _MODE_WORDS and b in _START_WORDS:  # "command" | "number start …"
+    if a in _MODE_WORDS and (b in _START_WORDS or b in _STOP_WORDS):  # "command" | "number start/stop"
         return True
-    return _command_follows(tokens, 0)          # "command" | "enter"
+    return _command_follows(tokens, 0)                   # "command" | "enter"
+
+
+def _all_filler(tokens: list[str]) -> bool:
+    """True if a SHORT utterance is nothing but trigger-tail filler — what the ASR
+    emits when it splits 'command' into 'command' + 'come and'. Bounded to ≤3 tokens
+    so it never eats a real sentence."""
+    return bool(tokens) and len(tokens) <= 3 and all(_norm(t) in _PREFIX_FILLER for t in tokens)
 
 
 def _num_value(tok: str) -> int | None:
@@ -466,15 +480,44 @@ def interpret(transcript: str, modes: dict | None = None,
     armed_baseline = 0
     retro_fired = False
     armed_erase = int(modes.pop("armed_prefix_erase", 0))   # read + clear (one-shot)
-    if prefix_mode and armed_erase and _prefix_would_act(tokens):
-        if line and armed_erase <= len(line):
-            actions.append(("erase", str(armed_erase)))
-            undo.append(line)
-            redo.clear()
-            line = line[: len(line) - armed_erase]
-        tokens = ["command"] + tokens          # re-arm as if "command" preceded this utterance
-        n = len(tokens)
-        retro_fired = True
+    pending_mode = modes.pop("pending_mode", None)          # "command <mode>" awaiting its "start"
+    if prefix_mode and armed_erase:
+        a0 = _norm(tokens[0]) if tokens else ""
+        if pending_mode:
+            # The previous utterance ended with "command <mode>" with no "start" yet (the VAD
+            # split "command caps" | "start …"). If THIS one opens with start/stop, erase the
+            # provisional "command <mode>" and reinterpret the full "command <mode> start/stop …".
+            if a0 in _START_WORDS or a0 in _STOP_WORDS:
+                if line and armed_erase <= len(line):
+                    actions.append(("erase", str(armed_erase)))
+                    undo.append(line)
+                    redo.clear()
+                    line = line[: len(line) - armed_erase]
+                tokens = ["command", pending_mode] + tokens
+                n = len(tokens)
+                retro_fired = True
+            elif _all_filler(tokens):
+                modes["armed_prefix_erase"] = armed_erase
+                modes["pending_mode"] = pending_mode   # keep the pending mode alive through filler
+                return []
+            # else: "command <mode>" was literal after all — drop it, type this normally.
+        elif _prefix_would_act(tokens):
+            if line and armed_erase <= len(line):
+                actions.append(("erase", str(armed_erase)))
+                undo.append(line)
+                redo.clear()
+                line = line[: len(line) - armed_erase]
+            tokens = ["command"] + tokens      # re-arm as if "command" preceded this utterance
+            n = len(tokens)
+            retro_fired = True
+        elif _all_filler(tokens):
+            # The ASR split the trigger ("command" + "come and"): swallow the tail and
+            # KEEP the arm so the NEXT utterance's start/command still completes it.
+            # Nothing typed, provisional "command" stays on screen, arm survives.
+            modes["armed_prefix_erase"] = armed_erase
+            return []
+        # else: a non-acting, non-filler utterance — the provisional "command" was a
+        # real literal word after all; drop the arm and let this utterance type normally.
 
     # ── continuation merge (natural dictation across a thinking pause) ────────
     # When this utterance continues a non-submitted line, the previous fragment
@@ -711,6 +754,14 @@ def interpret(transcript: str, modes: dict | None = None,
                     stack.append("once")
                     push_mode(_MODE_WORDS[nxt])
                     i += 3
+                    continue
+                if nxt in _MODE_WORDS and i + 2 >= n:            # "command <MODE>" at utterance END →
+                    armed_baseline = len(line)                  # arm a pending mode-open; the NEXT
+                    emit_word(tokens[i])                        # utterance's "start" reconstructs the
+                    emit_word(tokens[i + 1])                    # full "command <mode> start" (VAD split
+                    armed_prefix = True                         # "command caps" | "start …"). Provisional.
+                    modes["pending_mode"] = _MODE_WORDS[nxt]
+                    i += 2
                     continue
                 if _command_follows(tokens, i + 1):              # "command <cmd>" = COMMAND(cmd), one arg
                     stack.append("once")
