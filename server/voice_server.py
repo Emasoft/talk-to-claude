@@ -395,10 +395,18 @@ async def _iterm_connection():
 _KEY_BYTES = {
     "Enter": "\r",
     "Tab": "\t",
+    "BTab": "\x1b[Z",       # shift-tab (back-tab)
     "Escape": "\x1b",
     "BSpace": "\x7f",
+    "DC": "\x1b[3~",        # forward delete
     "Up": "\x1b[A",
     "Down": "\x1b[B",
+    "Right": "\x1b[C",
+    "Left": "\x1b[D",
+    "Home": "\x1b[H",
+    "End": "\x1b[F",
+    "PPage": "\x1b[5~",     # page up
+    "NPage": "\x1b[6~",     # page down
     "Newline": "\x1b\r",   # Meta+Enter = newline without submitting
 }
 
@@ -1170,6 +1178,65 @@ async def handle_focus(request):
     return web.json_response({"ok": True})
 
 
+async def handle_command(request):
+    """Tap a command tag: interpret the tag's PHRASE exactly like a spoken one and inject
+    it into the target — so tapping "tab" == saying "tab", reusing all the voice logic. A
+    tap is one-shot, so it uses fresh mode state. Logs (no injection) under --dry-run."""
+    if not authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    session = data.get("session", "")
+    phrase = data.get("phrase", "")
+    if not isinstance(session, str) or not isinstance(phrase, str) or not phrase.strip():
+        return web.json_response({"error": "session and phrase required"}, status=400)
+    actions = interpret(phrase, {}, prefix_mode=False)
+    if FORCE_DRY_RUN:
+        _dry_log(f"[tap] {phrase!r} => {render(actions)!r}")
+        return web.json_response({"ok": True, "injected": False, "rendered": render(actions)})
+    if not await target_exists(session):
+        return web.json_response({"error": "unknown session"}, status=404)
+    ok, err = await execute_actions(session, actions)
+    if not ok:
+        return web.json_response({"error": err}, status=500)
+    return web.json_response({"ok": True, "injected": True})
+
+
+async def handle_paste(request):
+    """Inject a multiline markdown block (numbered/bullet/quote/link/code) into the prompt
+    WITHOUT submitting: every newline becomes a Meta+Enter (Newline) so the whole block
+    lands as one multi-line prompt for the user to review and send. Logs under --dry-run."""
+    if not authorized(request):
+        return web.json_response({"error": "unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    session = data.get("session", "")
+    text = data.get("text", "")
+    if not isinstance(session, str) or not isinstance(text, str) or not text:
+        return web.json_response({"error": "session and text required"}, status=400)
+    if len(text) > MAX_TEXT_LEN:
+        text = text[:MAX_TEXT_LEN]
+    actions: list = []
+    for i, ln in enumerate(text.split("\n")):
+        if i:
+            actions.append(("key", "Newline"))   # line break WITHOUT submitting
+        if ln:
+            actions.append(("type", ln))
+    if FORCE_DRY_RUN:
+        _dry_log("[paste]\n" + text)
+        return web.json_response({"ok": True, "injected": False})
+    if not await target_exists(session):
+        return web.json_response({"error": "unknown session"}, status=404)
+    ok, err = await execute_actions(session, actions)
+    if not ok:
+        return web.json_response({"error": err}, status=500)
+    return web.json_response({"ok": True, "injected": True})
+
+
 # --------------------------------------------------------------------------- #
 # WebSocket audio stream
 # --------------------------------------------------------------------------- #
@@ -1466,6 +1533,8 @@ def make_app() -> web.Application:
             web.get("/test-suite", handle_test_suite),
             web.get("/pane", handle_pane),
             web.post("/say", handle_say),
+            web.post("/command", handle_command),
+            web.post("/paste", handle_paste),
             web.post("/focus", handle_focus),
             web.get("/stream", handle_stream),
         ]
