@@ -37,6 +37,18 @@ WebSocket protocol (/stream):
          {"type":"speech_start"}
          {"type":"final","text": "..."}     (after an utterance is transcribed+injected)
          {"type":"status","text": "..."}
+
+App home directory:
+    ~/.talktoclaude/ holds everything this server persists (currently the
+    dry-run log). Created automatically on startup. Override with the
+    CLAUDE_VOICE_HOME environment variable.
+
+Testing without a live Claude session (--dry-run):
+    Run with --dry-run to transcribe + interpret every utterance but NEVER
+    inject into any session — each recognized line is appended to the dry-run
+    log instead (default ~/.talktoclaude/dryrun.log, override --dry-run-log).
+    This lets you exercise the iOS client end-to-end while your real Claude
+    sessions keep working undisturbed. See `voice_server.py --help`.
 """
 
 import argparse
@@ -119,6 +131,25 @@ TMUX = "tmux"
 BACKEND = DEFAULT_BACKEND
 MODEL = ""        # resolved to the active backend's model id in main()
 PARAKEET = None   # loaded ParakeetTDT (on the ASR thread) when BACKEND == "parakeet"
+
+# App-wide home dir — everything this server persists (the dry-run log, and any
+# future state) lives under here. Override with CLAUDE_VOICE_HOME. Created in main().
+APP_DIR = os.path.expanduser(os.environ.get("CLAUDE_VOICE_HOME", "~/.talktoclaude"))
+# --dry-run (server-wide): never inject into ANY Claude session; append every
+# recognized utterance to DRY_RUN_LOG instead. Both populated in main().
+FORCE_DRY_RUN = False
+DRY_RUN_LOG = os.path.join(APP_DIR, "dryrun.log")
+
+
+def _dry_log(text: str) -> None:
+    """Append one recognized utterance to the dry-run log (server --dry-run mode).
+    Best-effort by design: a log-write failure must never break live transcription,
+    so a filesystem error is warned about but not raised."""
+    try:
+        with open(DRY_RUN_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\t{text}\n")
+    except OSError as e:
+        print(f"[dry-run] could not write {DRY_RUN_LOG}: {e}", file=sys.stderr)
 
 # ── optional LLM correction (--correct) ──────────────────────────────────────
 # A small local instruct model (mlx-lm) fixes ASR mis-transcriptions — mis-heard
@@ -1141,7 +1172,7 @@ async def handle_stream(request):
     session = str(cfg.get("session", ""))
     # dry_run = self-test mode: transcribe + interpret but DON'T inject anywhere (and
     # skip the target check, since there's no real Claude session behind it).
-    dry_run = bool(cfg.get("dry_run"))
+    dry_run = bool(cfg.get("dry_run")) or FORCE_DRY_RUN
     if not dry_run and not await target_exists(session):
         await ws.send_json({"type": "error", "error": "unknown session"})
         await ws.close()
@@ -1252,7 +1283,9 @@ async def handle_stream(request):
                             actions = actions + [("key", "Enter")]
                             _reset_line(modes)            # auto-submitted -> no longer editable
                         if dry_run:
-                            ok, err = True, None          # self-test: never touch a real session
+                            ok, err = True, None          # self-test / --dry-run: never touch a real session
+                            if FORCE_DRY_RUN:             # server-wide dry-run: record the utterance
+                                _dry_log(text)
                         else:
                             ok, err = await execute_actions(session, actions)
                             if not ok:
@@ -1339,6 +1372,7 @@ def make_app() -> web.Application:
 
 def main():
     global TOKEN, TMUX, MODEL, BACKEND, CORRECT_ENABLED, CORRECT_MODEL_ID, CORRECT_VOCAB
+    global FORCE_DRY_RUN, DRY_RUN_LOG
 
     parser = argparse.ArgumentParser(description="Talk to Claude v2 voice server")
     parser.add_argument("--host", default=None, help="Bind address (default: Tailscale IP)")
@@ -1355,6 +1389,11 @@ def main():
     parser.add_argument("--correct-model", default=CORRECT_MODEL_ID, help="mlx-lm model for correction")
     parser.add_argument("--correct-vocab", default=os.environ.get("CLAUDE_VOICE_VOCAB", ""),
                         help="Known terms hint for correction, e.g. 'Stripe, tmux, MLX'")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Never inject into any Claude session; append each recognized "
+                             "utterance to the dry-run log instead (safe end-to-end testing)")
+    parser.add_argument("--dry-run-log", default=DRY_RUN_LOG,
+                        help=f"Where --dry-run writes transcriptions (default: {DRY_RUN_LOG})")
     args = parser.parse_args()
 
     TOKEN = args.token
@@ -1364,6 +1403,11 @@ def main():
     CORRECT_ENABLED = args.correct
     CORRECT_MODEL_ID = args.correct_model
     CORRECT_VOCAB = args.correct_vocab
+    FORCE_DRY_RUN = args.dry_run
+    DRY_RUN_LOG = args.dry_run_log
+    os.makedirs(APP_DIR, exist_ok=True)
+    if FORCE_DRY_RUN:
+        os.makedirs(os.path.dirname(os.path.abspath(DRY_RUN_LOG)) or ".", exist_ok=True)
 
     host = args.host or detect_tailscale_ip()
     no_tailscale = host is None
@@ -1391,6 +1435,8 @@ def main():
     print(f"   Backend      : {BACKEND}")
     print(f"   Model        : {MODEL}")
     print(f"   Correction   : {CORRECT_MODEL_ID if CORRECT_ENABLED else 'off'}")
+    if FORCE_DRY_RUN:
+        print(f"   DRY-RUN      : ON — NO injection; logging to {DRY_RUN_LOG}")
     sessions = list_sessions()
     print(f"   tmux sessions: {', '.join(sessions) if sessions else '(none found)'}")
     if no_tailscale:
