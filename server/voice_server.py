@@ -743,9 +743,14 @@ class UtteranceSegmenter:
         self,
         sample_rate=SAMPLE_RATE,
         window_sec=0.03,
-        threshold=0.012,
+        # Lower threshold + a longer pre-roll so the FIRST words aren't clipped: an energy
+        # VAD only fires once the onset crosses `threshold`, by which point the first
+        # soft consonant/syllable has already passed — so we (a) trigger earlier (lower
+        # threshold) and (b) prepend up to `preroll_sec` of audio captured BEFORE the
+        # trigger to the utterance.
+        threshold=0.008,
         silence_hold_sec=0.7,
-        preroll_sec=0.3,
+        preroll_sec=0.8,
         min_speech_sec=0.25,
         max_utt_sec=30.0,
     ):
