@@ -28,6 +28,9 @@ final class VoiceStream: ObservableObject {
     // True while a user-initiated stop is flushing the in-flight utterance: we keep the
     // socket open just long enough to receive that last final, then close.
     private var flushClosePending = false
+    // True after a raw "preview" line was shown and we're awaiting the corrected "final"
+    // that upgrades that same line in place (Phase 3 raw-then-corrected).
+    private var previewPending = false
 
     private let settings: AppSettings
     // A long-lived WebSocket: the server only sends data back WHEN you speak, so a long
@@ -91,6 +94,7 @@ final class VoiceStream: ObservableObject {
         tailscaleOffLikely = false
         transcribing = false
         flushClosePending = false
+        previewPending = false
         level = 0
         // NB: do NOT clear finals — the transcript is a permanent log across recordings.
         connect(session: session)
@@ -184,12 +188,14 @@ final class VoiceStream: ObservableObject {
 
     /// Live reconfiguration over the OPEN socket — switch the target Claude or toggle
     /// prefix mode with no reconnect (instant). No-op when not connected.
-    func sendControl(session: String? = nil, prefixMode: Bool? = nil, autoSend: Bool? = nil) {
+    func sendControl(session: String? = nil, prefixMode: Bool? = nil, autoSend: Bool? = nil,
+                     silenceHold: Double? = nil) {
         guard let t = task else { return }
         var obj: [String: Any] = ["type": "config"]
         if let session { obj["session"] = session }
         if let prefixMode { obj["prefix_mode"] = prefixMode }
         if let autoSend { obj["auto_send"] = autoSend }
+        if let silenceHold { obj["silence_hold"] = silenceHold }
         guard obj.count > 1,
               let data = try? JSONSerialization.data(withJSONObject: obj),
               let json = String(data: data, encoding: .utf8) else { return }
@@ -197,16 +203,20 @@ final class VoiceStream: ObservableObject {
     }
 
     private func receiveLoop() {
-        task?.receive { [weak self] result in
+        guard let current = task else { return }
+        current.receive { [weak self] result in
             guard let self else { return }
-            switch result {
-            case .success(let message):
-                if case .string(let text) = message {
-                    Task { @MainActor in self.handle(text) }
-                }
-                Task { @MainActor in self.receiveLoop() }  // re-arm on the main actor
-            case .failure:
-                Task { @MainActor in
+            Task { @MainActor in
+                // Ignore callbacks from a socket we've already replaced or closed. Without
+                // this, a cancelled socket's delayed .failure would nil the NEW task/liveTask,
+                // so the next recording captured audio (meter moved) but sent it nowhere and
+                // never received finals — the "records only once" bug.
+                guard self.task === current else { return }
+                switch result {
+                case .success(let message):
+                    if case .string(let text) = message { self.handle(text) }
+                    self.receiveLoop()             // re-arm on the same (current) socket
+                case .failure:
                     self.connected = false
                     self.task = nil
                     self.liveTask = nil
@@ -280,6 +290,7 @@ final class VoiceStream: ObservableObject {
         case "speech_start":
             speaking = true
             transcribing = false
+            previewPending = false      // new utterance — any prior preview is resolved
             status = "Hearing you…"
         case "transcribing":
             // Utterance ended; the server is decoding it. Drop the REC indicator and show
@@ -287,15 +298,32 @@ final class VoiceStream: ObservableObject {
             speaking = false
             transcribing = true
             status = "Transcribing…"
+        case "preview":
+            // Raw transcription shown IMMEDIATELY as the newest line; the "final" below
+            // upgrades this same line in place with the corrected text (Phase 3).
+            speaking = false
+            transcribing = false
+            if let line = obj["text"] as? String, !line.isEmpty {
+                finals.insert(line, at: 0)
+                if finals.count > 500 { finals.removeLast() }
+                previewPending = true    // don't persist yet — the corrected final will
+            }
         case "final":
             speaking = false
             transcribing = false
             status = flushClosePending ? "Stopped" : "Listening…"
             if let line = obj["text"] as? String, !line.isEmpty {
-                finals.insert(line, at: 0)
-                if finals.count > 500 { finals.removeLast() }   // whole-session scrollback
+                if previewPending, !finals.isEmpty {
+                    finals[0] = line                             // upgrade preview → corrected
+                } else {
+                    finals.insert(line, at: 0)
+                    if finals.count > 500 { finals.removeLast() }
+                }
                 saveTranscript()                                 // permanent log
+            } else if previewPending {
+                saveTranscript()                                 // keep the raw preview line
             }
+            previewPending = false
             // Surface tmux-injection failures: the words were heard but never
             // reached Claude (e.g. the target session was killed).
             if let injected = obj["injected"] as? Bool {

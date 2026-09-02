@@ -751,6 +751,7 @@ class UtteranceSegmenter:
     ):
         self.sr = sample_rate
         self.win = max(1, int(window_sec * sample_rate))
+        self.window_sec = window_sec
         self.threshold = threshold
         self.silence_hold_win = max(1, int(silence_hold_sec / window_sec))
         self.preroll_win = max(0, int(preroll_sec / window_sec))
@@ -831,6 +832,11 @@ class UtteranceSegmenter:
             finished = np.concatenate(self._utt).astype(np.float32)
         self._reset()
         return finished
+
+    def set_silence_hold(self, sec: float):
+        """Live-adjust the pause length that ends an utterance (the Settings slider),
+        applied to the RUNNING segmenter with no reconnect."""
+        self.silence_hold_win = max(1, int(sec / self.window_sec))
 
 
 # parakeet_mlx is an OPTIONAL backend dependency, imported lazily so the default
@@ -934,16 +940,28 @@ def _transcribe_whisper(audio: np.ndarray, context: str) -> str:
 
 
 _CORRECT_SYSTEM = (
-    "You correct speech-to-text errors in voice dictation about software development. "
-    "The dictation may be in ENGLISH or ITALIAN. The recognizer mis-hears words, especially "
-    "technical terms (libraries, APIs, identifiers), proper nouns, and homophones. Replace "
-    "each mis-heard word with the word MOST LIKELY actually spoken, judged by how similar "
-    "they SOUND, using any known terms given. Keep the SAME language as the input. Preserve "
-    "wording, meaning, length, and intent. Do NOT paraphrase, answer, translate, or comment. "
-    "If already correct, return it verbatim. Output ONLY the corrected text."
+    "You repair ONLY clear speech-to-text mis-hearings in voice dictation about software "
+    "development. The input may be ENGLISH or ITALIAN, possibly with a regional accent or "
+    "dialect (Italian-American, Latin-American Spanish, British English, etc.).\n"
+    "STRICT RULES:\n"
+    "1. Change a word ONLY when it is almost certainly a mis-hearing of a word that SOUNDS "
+    "nearly identical — especially technical terms (libraries, APIs, identifiers), proper "
+    "nouns, and homophones. Prefer any provided known terms.\n"
+    "2. Otherwise keep every word EXACTLY as given.\n"
+    "3. NEVER paraphrase, reword, reorder, translate, summarize, answer, explain, or 'improve' "
+    "style, grammar, or punctuation. Do NOT add or delete words.\n"
+    "4. PRESERVE the meaning, intent, length, tense, and register — including casual, slang, "
+    "or dialectal phrasing. Accented/dialectal wording is CORRECT, not an error to normalize.\n"
+    "5. When unsure whether a word is a mis-hearing, KEEP THE ORIGINAL. If the whole input is "
+    "already plausible, return it VERBATIM.\n"
+    "6. If recent dictation context is provided, use it ONLY to disambiguate homophones and "
+    "recurring terms/names — NEVER copy, continue, repeat, or answer it.\n"
+    "Output ONLY the resulting text for the current transcription (unchanged if in doubt), "
+    "nothing else."
 )
-# Few-shot pairs — these are what make the model fix the HARD phonetic mis-hearings (and NOT
-# over-correct already-correct text), in BOTH languages. Verified empirically before shipping.
+# Few-shot pairs — teach BOTH halves: fix the hard phonetic mis-hearings, but leave casual /
+# dialectal / already-correct speech completely untouched (no rephrasing, no normalizing).
+# Verified empirically before shipping.
 _CORRECT_SHOTS = (
     ("Known terms: Stripe\nTranscription: replace the fake strap test",
      "replace the fake Stripe test"),
@@ -953,6 +971,12 @@ _CORRECT_SHOTS = (
      "puoi sistemare il bug nel codice"),
     ("Transcription: Is there a better way to solve this?",
      "Is there a better way to solve this?"),
+    # Casual/dialectal English — meaning intact: DO NOT normalize, expand, or reword.
+    ("Transcription: yo gimme a sec I gotta check the logs real quick",
+     "yo gimme a sec I gotta check the logs real quick"),
+    # Italian already fine (colloquial) — return verbatim, no rephrasing to 'proper' Italian.
+    ("Transcription: allora fammi vedere se funziona 'sta roba",
+     "allora fammi vedere se funziona 'sta roba"),
 )
 
 
@@ -967,9 +991,11 @@ def _ensure_corrector():
         _CORRECT_SAMPLER = make_sampler(temp=0.0)   # deterministic — no creative rewriting
 
 
-def correct_text(raw: str) -> str:
+def correct_text(raw: str, context_lines=None) -> str:
     """Fix ASR mis-transcriptions with the local LLM (runs on the ASR thread). Falls
-    back to the raw text on any anomaly, so correction can never make things worse."""
+    back to the raw text on any anomaly, so correction can never make things worse.
+    `context_lines` = the last few corrected utterances, given to the model as CONTEXT to
+    disambiguate homophones/recurring terms (it is told never to copy or continue them)."""
     if not raw or not raw.strip():
         return raw
     from mlx_lm import generate
@@ -978,8 +1004,15 @@ def correct_text(raw: str) -> str:
     msgs = [{"role": "system", "content": _CORRECT_SYSTEM}]
     for u, a in _CORRECT_SHOTS:
         msgs += [{"role": "user", "content": u}, {"role": "assistant", "content": a}]
-    user = (f"Known terms: {CORRECT_VOCAB}\n" if CORRECT_VOCAB else "") + f"Transcription: {raw}"
-    msgs.append({"role": "user", "content": user})
+    parts = []
+    if context_lines:
+        joined = "\n".join(context_lines[-10:])
+        parts.append("Recent dictation (CONTEXT ONLY — do not change, repeat, or continue it):\n"
+                     + joined)
+    if CORRECT_VOCAB:
+        parts.append(f"Known terms: {CORRECT_VOCAB}")
+    parts.append(f"Transcription: {raw}")
+    msgs.append({"role": "user", "content": "\n".join(parts)})
     prompt = tok.apply_chat_template(msgs, add_generation_prompt=True)
     # Cap generation to ~4 tokens/word so it can't run off into a paraphrase or answer.
     cap = min(200, max(32, len(raw.split()) * 4 + 16))
@@ -1227,6 +1260,7 @@ async def handle_stream(request):
     seg = UtteranceSegmenter(sample_rate=sample_rate, silence_hold_sec=silence_hold)
     modes: dict = {}  # persistent caps/spell + editable-line state for this connection
     mon_secs, mon_peak, dead_warned, noise_run = 0.0, 0.0, False, 0  # audio-health monitor
+    recent_context: list[str] = []  # last few corrected finals — CONTEXT for the corrector
     await ws.send_json({"type": "ready", "session": session, "sample_rate": sample_rate})
     await ws.send_json({"type": "cheatsheet", "groups": cheatsheet()})
     print(f"[stream] connected -> session={session!r} sr={sample_rate} "
@@ -1239,6 +1273,7 @@ async def handle_stream(request):
         identically. Reassigns noise_run → nonlocal; reads the live session/correct/
         prefix_mode/auto_send by closure so mid-stream reconfig is honored."""
         nonlocal noise_run
+        nonlocal recent_context
         # ── audio health: AUTOFIX faint speech by normalizing its level, and warn ──
         rms = _loudness(utt)
         if 0 < rms < _FAINT_RMS:
@@ -1267,11 +1302,18 @@ async def handle_stream(request):
         else:
             noise_run = 0
         if text and correct:
+            # Phase 3: show the RAW transcription IMMEDIATELY (before the correction pass),
+            # then the "final" below upgrades that same line to the corrected text. This
+            # hides the ~0.6s correction latency — the words appear as soon as ASR finishes.
+            await ws.send_json({"type": "preview", "text": text})
+        if text and correct:
             # Fix ASR mis-transcriptions before command interpretation + injection.
             # Best-effort: on failure keep the raw text.
             raw_text = text
             try:
-                text = await loop.run_in_executor(ASR_EXECUTOR, correct_text, text)
+                text = await loop.run_in_executor(
+                    ASR_EXECUTOR, correct_text, text, list(recent_context)
+                )
             except Exception as e:  # noqa: BLE001
                 print(f"[stream] correction failed (using raw): {e}", file=sys.stderr)
             if text != raw_text:
@@ -1307,6 +1349,10 @@ async def handle_stream(request):
                                 "edit": now[2], "symbols": now[3]})
         print(f"[stream] -> {session}: {text!r} => {render(actions)!r} ok={ok}",
               file=sys.stderr)
+        # Keep the last few corrected finals as context for the NEXT correction.
+        recent_context.append(text)
+        if len(recent_context) > 10:
+            del recent_context[0]
 
     try:
         async for msg in ws:
@@ -1359,9 +1405,15 @@ async def handle_stream(request):
                         auto_send = bool(upd["auto_send"])
                     if "correct" in upd:
                         correct = bool(upd["correct"])
+                    if "silence_hold" in upd:
+                        try:
+                            silence_hold = max(0.3, min(float(upd["silence_hold"]), 5.0))
+                            seg.set_silence_hold(silence_hold)   # apply to the LIVE segmenter
+                        except (TypeError, ValueError):
+                            pass
                     print(f"[stream] reconfigured -> session={session!r} "
-                          f"prefix_mode={prefix_mode} auto_send={auto_send} correct={correct}",
-                          file=sys.stderr)
+                          f"prefix_mode={prefix_mode} auto_send={auto_send} correct={correct} "
+                          f"silence_hold={silence_hold}", file=sys.stderr)
                 elif upd.get("type") == "flush":
                     # The user tapped stop — force-close and transcribe the in-flight
                     # utterance so nothing captured before the pause is lost, then ack so

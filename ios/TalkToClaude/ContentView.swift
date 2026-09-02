@@ -111,6 +111,10 @@ struct ContentView: View {
         .onChange(of: settings.autoSend) { _, on in
             if voice.listening { voice.sendControl(autoSend: on) }
         }
+        // Pause-to-end slider applies LIVE to the running segmenter (no mic toggle needed).
+        .onChange(of: settings.pauseThreshold) { _, sec in
+            if voice.listening { voice.sendControl(silenceHold: sec) }
+        }
         // Success haptic the moment the server is READY — the cue to start speaking, so
         // the user doesn't talk during startup and lose the first words.
         .onChange(of: voice.connected) { _, ready in
