@@ -157,9 +157,17 @@ def _dry_log(text: str) -> None:
 # 3B + few-shot catches the hard phonetic mis-hearings (strap→Stripe,
 # off-indication→authentication) at ~0.4s/utterance without over-correcting clean
 # text. Runs on the same ASR thread as transcription (one MLX Metal stream).
-CORRECT_MODEL_ID = "mlx-community/gemma-3-4b-it-4bit"   # bilingual EN+IT (verified), ~0.6s
-CORRECT_ENABLED = False  # OPT-IN: a small LLM rewriting disfluent/command speech hallucinates
-                         # (—it's safe only with the word-overlap gate in correct_text). --correct enables.
+# Gemma 3 4B, instruction-tuned + 4-bit. NOTE: the "it" suffix means INSTRUCTION-TUNED,
+# NOT Italian — Gemma 3 is MULTILINGUAL (140+ languages), so it covers English + Italian
+# (the selected langs) and any other language equally. Swap only for another multilingual
+# instruct model if you change this.
+CORRECT_MODEL_ID = "mlx-community/gemma-3-4b-it-4bit"
+# Correction is NON-OPTIONAL: the model is ALWAYS preloaded at startup (see main()), so a
+# fresh server never stalls the first utterance on a lazy download (that stall could drop
+# the utterance if the socket died mid-load). Applied by default; the word-overlap gate in
+# correct_text keeps it from hallucinating on already-clean text. --no-correct only skips
+# APPLYING it — the model is loaded regardless.
+CORRECT_ENABLED = True
 CORRECT_VOCAB = ""       # optional known-terms hint (--correct-vocab "Stripe, tmux, MLX")
 CORRECTOR = None         # (model, tokenizer) loaded lazily on the ASR thread
 _CORRECT_SAMPLER = None
@@ -1393,7 +1401,8 @@ def main():
                              "parakeet is optional, needs `uv sync --extra parakeet`)")
     parser.add_argument("--model", default="", help="Model id; defaults to the backend's model")
     parser.add_argument("--correct", action=argparse.BooleanOptionalAction, default=CORRECT_ENABLED,
-                        help="LLM correction of ASR output before inject (--no-correct to disable)")
+                        help="Apply LLM correction to ASR output before inject (on by default). "
+                             "--no-correct skips APPLYING it; the model is always preloaded regardless.")
     parser.add_argument("--correct-model", default=CORRECT_MODEL_ID, help="mlx-lm model for correction")
     parser.add_argument("--correct-vocab", default=os.environ.get("CLAUDE_VOICE_VOCAB", ""),
                         help="Known terms hint for correction, e.g. 'Stripe, tmux, MLX'")
@@ -1435,11 +1444,13 @@ def main():
     # MLX Metal stream.
     ASR_EXECUTOR.submit(_load_model, BACKEND, MODEL).result()
     print(f"Model ready in {time.time() - t0:.1f}s", file=sys.stderr)
-    if CORRECT_ENABLED:
-        print(f"Loading correction model {CORRECT_MODEL_ID} (one-time)…", file=sys.stderr)
-        t0 = time.time()
-        ASR_EXECUTOR.submit(_ensure_corrector).result()   # preload on the ASR thread
-        print(f"Corrector ready in {time.time() - t0:.1f}s", file=sys.stderr)
+    # Correction is non-optional: ALWAYS preload the corrector at startup (blocking, on the
+    # ASR thread) so the first utterance never stalls on a lazy model download — even when
+    # --no-correct is set (it only disables APPLYING correction, not loading the model).
+    print(f"Loading correction model {CORRECT_MODEL_ID} (one-time)…", file=sys.stderr)
+    t0 = time.time()
+    ASR_EXECUTOR.submit(_ensure_corrector).result()   # preload on the ASR thread
+    print(f"Corrector ready in {time.time() - t0:.1f}s", file=sys.stderr)
 
     print("─" * 64)
     print(" Talk to Claude — v2 voice server")
@@ -1447,7 +1458,8 @@ def main():
     print(f"   Token        : {TOKEN}")
     print(f"   Backend      : {BACKEND}")
     print(f"   Model        : {MODEL}")
-    print(f"   Correction   : {CORRECT_MODEL_ID if CORRECT_ENABLED else 'off'}")
+    print(f"   Correction   : {CORRECT_MODEL_ID} "
+          f"({'applied' if CORRECT_ENABLED else 'loaded, applying OFF'})")
     if FORCE_DRY_RUN:
         print(f"   DRY-RUN      : ON — NO injection; logging to {DRY_RUN_LOG}")
     sessions = list_sessions()
