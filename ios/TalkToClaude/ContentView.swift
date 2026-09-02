@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showSearch = false
     @State private var showSessions: Bool     // collapsible Claude-session column
     @AppStorage("transcriptHeight") private var transcriptHeight = 150.0  // resizable box
+    @State private var activeDialog: MarkdownDialogKind? = nil   // open markdown-input sheet
     @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
     @AppStorage("didCompleteOnboarding") private var didOnboard = false
     @Environment(\.scenePhase) private var scenePhase
@@ -74,6 +75,12 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) { SettingsView(settings: settings, claude: claude) }
         .sheet(isPresented: $showSearch) { CheatSheetView(groups: voice.cheatGroups) }
+        // Markdown input sheet (numbered/bullet/quote/link/code) → composed text to Claude.
+        .sheet(item: $activeDialog) { kind in
+            MarkdownDialog(kind: kind) { composed in
+                tapFeedback(); Task { await claude.sendPaste(composed) }
+            }
+        }
         // First launch: explain the free Mac companion server and how to install it.
         .fullScreenCover(isPresented: Binding(
             get: { !didOnboard },
@@ -297,7 +304,8 @@ struct ContentView: View {
             // >= 900 failed on an 11" iPad in PORTRAIT, where the chip area is < 900pt, so
             // it wrongly fell back to the tiny iPhone size.)
             let tall = UIDevice.current.userInterfaceIdiom == .pad
-            let all = voice.cheatGroups.flatMap { $0.items }
+            // Server commands + app-only markdown-dialog tags (link, big code paste).
+            let all = voice.cheatGroups.flatMap { $0.items } + Self.markdownExtras
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
             // Group related/opposite commands (arrows, undo/redo, open/close brackets, …)
@@ -394,7 +402,11 @@ struct ContentView: View {
     private func clusterKey(for item: CheatItem) -> String? {
         switch item.say.lowercased() {
         case "enter", "new line":                              return "return"
-        case "arrow up", "arrow down":                         return "arrows"
+        case "tab", "shift tab":                               return "tab"
+        case "backspace", "forward delete":                    return "erase"
+        case "arrow up", "arrow down", "arrow left", "arrow right": return "arrows"
+        case "home", "line end":                               return "homeend"
+        case "page up", "page down":                           return "paging"
         case "undo", "redo":                                   return "history"
         case "open quotes", "close quotes":                    return "dquotes"
         case "open code block", "close code block":            return "fence"
@@ -422,49 +434,77 @@ struct ContentView: View {
         return order.map { buckets[$0]! }
     }
 
-    /// A cluster of related chips rendered as one fixed-width cell: each member on its own
-    /// row, tinted by role (open=green, close=red, else steel), sharing the glass chrome —
-    /// so opposites/related commands read as a single vertical group.
+    /// One TAPPABLE command row: the bicolor chip in a Button that either fires a command
+    /// (/command, interpreted server-side like speech) or opens a markdown-input dialog.
+    /// TagButtonStyle supplies the glow + push-down; the haptic fires in rowTapped.
+    private func commandRow(_ item: CheatItem, display: String, outColor: Color,
+                            fontSize: CGFloat) -> some View {
+        Button { rowTapped(item) } label: {
+            slantBicolor(say: display, out: item.out, outColor: outColor,
+                         fontSize: fontSize, sayFills: true)
+        }
+        .buttonStyle(TagButtonStyle())
+    }
+
+    /// Tap action: markdown tags open an input dialog; every other tag is sent to the
+    /// selected Claude via /command.
+    private func rowTapped(_ item: CheatItem) {
+        if let kind = MarkdownDialogKind(say: item.say) {
+            activeDialog = kind
+            return
+        }
+        tapFeedback()
+        Task { await claude.sendCommand(item.say) }
+    }
+
+    /// A cluster of related chips as one fixed-width cell — each member its own tappable
+    /// row (open=green, close=red, else steel), sharing the glass chrome.
     private func clusterCell(_ items: [CheatItem], fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
             VStack(spacing: 1) {
                 ForEach(items) { it in
-                    slantBicolor(say: italian ? it.sayIt : it.say, out: it.out,
-                                 outColor: toneColor(for: it), fontSize: fontSize, sayFills: true)
+                    commandRow(it, display: italian ? it.sayIt : it.say,
+                               outColor: toneColor(for: it), fontSize: fontSize)
                 }
             }
             .frame(width: width)
         )
     }
 
-    /// Bicolor chip: phrase (dark-indigo glass) and output (steel glass) meet along a
-    /// diagonal slant, wrapped in glass chrome (frosted material + lit edge + shadow).
+    /// A single tappable command tag.
     private func singleCell(_ item: CheatItem, fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
-            slantBicolor(say: italian ? item.sayIt : item.say, out: item.out, outColor: toneColor(for: item),
-                         fontSize: fontSize, sayFills: true)
+            commandRow(item, display: italian ? item.sayIt : item.say,
+                       outColor: toneColor(for: item), fontSize: fontSize)
                 .frame(width: width)
         )
     }
 
-    /// A mode rendered as one fixed-width cell sharing the glass chrome: START on top
-    /// (green), STOP at the bottom (red), and — for REPLACE — a middle "REPLACE WITH"
-    /// row (steel). So delete is 2 rows; replace is 3.
+    /// A mode as one fixed-width cell: START (green), optional REPLACE-WITH (steel), STOP
+    /// (red) — each a tappable row.
     private func pairCell(_ p: ModePair, fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
             VStack(spacing: 1) {
-                slantBicolor(say: (italian ? p.start.sayIt : p.start.say).uppercased(), out: p.start.out,
-                             outColor: Self.chipOpen, fontSize: fontSize, sayFills: true)
+                commandRow(p.start, display: (italian ? p.start.sayIt : p.start.say).uppercased(),
+                           outColor: Self.chipOpen, fontSize: fontSize)
                 if let mid = p.middle {
-                    slantBicolor(say: (italian ? mid.sayIt : mid.say).uppercased(), out: mid.out,
-                                 outColor: Self.chipOut, fontSize: fontSize, sayFills: true)
+                    commandRow(mid, display: (italian ? mid.sayIt : mid.say).uppercased(),
+                               outColor: Self.chipOut, fontSize: fontSize)
                 }
-                slantBicolor(say: (italian ? p.stop.sayIt : p.stop.say).uppercased(), out: p.stop.out,
-                             outColor: Self.chipClose, fontSize: fontSize, sayFills: true)
+                commandRow(p.stop, display: (italian ? p.stop.sayIt : p.stop.say).uppercased(),
+                           outColor: Self.chipClose, fontSize: fontSize)
             }
             .frame(width: width)
         )
     }
+
+    /// App-only markdown-dialog tags appended to the palette (not server commands).
+    static let markdownExtras: [CheatItem] = [
+        CheatItem(say: "insert link", sayIt: "inserisci link", out: "[](url)", label: "link",
+                  triggers: ["insert link"], pair: nil, role: nil),
+        CheatItem(say: "paste code", sayIt: "incolla codice", out: "````", label: "code",
+                  triggers: ["paste code"], pair: nil, role: nil),
+    ]
 
     /// The two-tone diagonally-split interior (no chrome). The phrase half and the
     /// output half are clipped to complementary slants and overlapped so their
@@ -794,6 +834,129 @@ struct TranscriptView: View {
                         }
                         .onEnded { _ in dragStart = nil }
                 )
+        }
+    }
+}
+
+/// Button feedback for a command tag: pressing pushes down (scale), brightens, and casts
+/// an inner white glow — like a lit key lighting up. Haptic is fired by the tap handler.
+struct TagButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .brightness(configuration.isPressed ? 0.22 : 0)
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(.white.opacity(configuration.isPressed ? 0.28 : 0))
+                    .blendMode(.plusLighter)
+                    .allowsHitTesting(false)
+            )
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .shadow(color: .white.opacity(configuration.isPressed ? 0.7 : 0),
+                    radius: configuration.isPressed ? 12 : 0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+/// The markdown-input tags that open a compose/paste dialog. `init?(say:)` maps a tag's
+/// English phrase to its kind (nil for ordinary tags).
+enum MarkdownDialogKind: String, Identifiable {
+    case numbered, bullet, quote, link, code
+    var id: String { rawValue }
+
+    init?(say: String) {
+        switch say.lowercased() {
+        case "numbered item": self = .numbered
+        case "bullet":        self = .bullet
+        case "quote block":   self = .quote
+        case "insert link":   self = .link
+        case "paste code":    self = .code
+        default:              return nil
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .numbered: return "Numbered list"
+        case .bullet:   return "Bulleted list"
+        case .quote:    return "Quote block"
+        case .link:     return "Insert link"
+        case .code:     return "Paste code block"
+        }
+    }
+    var prompt: String {
+        switch self {
+        case .numbered, .bullet: return "One item per line — paste or type your list."
+        case .quote:             return "Paste or type the text to quote."
+        case .link:              return "Link text and URL."
+        case .code:              return "Paste your code — it's wrapped in 4 backticks."
+        }
+    }
+}
+
+/// A sheet that composes a markdown block from pasted/typed input, then sends it to Claude
+/// as one multi-line prompt. Works on iPhone and iPad (standard Form/sheet).
+struct MarkdownDialog: View {
+    let kind: MarkdownDialogKind
+    var onSubmit: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+    @State private var linkText = ""
+    @State private var linkURL = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section { Text(kind.prompt).font(.footnote).foregroundStyle(.secondary) }
+                if kind == .link {
+                    Section("Text") { TextField("link text", text: $linkText) }
+                    Section("URL") {
+                        TextField("https://…", text: $linkURL)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
+                } else {
+                    Section {
+                        TextEditor(text: $text)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(minHeight: 220)
+                            .autocorrectionDisabled()
+                    }
+                }
+            }
+            .navigationTitle(kind.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Send") { onSubmit(compose()); dismiss() }.disabled(isEmpty)
+                }
+            }
+        }
+    }
+
+    private var isEmpty: Bool {
+        kind == .link ? linkURL.trimmingCharacters(in: .whitespaces).isEmpty
+                      : text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Turn the raw input into markdown per kind.
+    private func compose() -> String {
+        switch kind {
+        case .numbered:
+            let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+            return lines.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        case .bullet:
+            let lines = text.split(whereSeparator: \.isNewline).map(String.init)
+            return lines.map { "- \($0)" }.joined(separator: "\n")
+        case .quote:
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            return lines.map { "> \($0)" }.joined(separator: "\n")
+        case .code:
+            return "````\n\(text)\n````"
+        case .link:
+            let t = linkText.trimmingCharacters(in: .whitespaces)
+            let u = linkURL.trimmingCharacters(in: .whitespaces)
+            return t.isEmpty ? u : "[\(t)](\(u))"
         }
     }
 }

@@ -54,6 +54,21 @@
         "role": null
       },
       {
+        "say": "shift tab",
+        "say_it": "tab indietro",
+        "out": "⇤",
+        "label": "⇤ shift-tab",
+        "triggers": [
+          "shift tab",
+          "shift-tab",
+          "back tab",
+          "backtab",
+          "tab indietro"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
         "say": "escape",
         "say_it": "escape",
         "out": "esc",
@@ -75,6 +90,21 @@
           "scratch that",
           "cancella",
           "cancella quello"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "forward delete",
+        "say_it": "canc",
+        "out": "⌦",
+        "label": "⌦ delete",
+        "triggers": [
+          "forward delete",
+          "delete forward",
+          "delete key",
+          "del key",
+          "canc"
         ],
         "pair": null,
         "role": null
@@ -103,6 +133,100 @@
           "down arrow",
           "freccia giù",
           "freccia in giù"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "arrow left",
+        "say_it": "freccia sinistra",
+        "out": "←",
+        "label": "←",
+        "triggers": [
+          "arrow left",
+          "left arrow",
+          "freccia sinistra"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "arrow right",
+        "say_it": "freccia destra",
+        "out": "→",
+        "label": "→",
+        "triggers": [
+          "arrow right",
+          "right arrow",
+          "freccia destra"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "home",
+        "say_it": "inizio riga",
+        "out": "↖",
+        "label": "↖ home",
+        "triggers": [
+          "home",
+          "line start",
+          "start of line",
+          "inizio riga"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "line end",
+        "say_it": "fine riga",
+        "out": "↘",
+        "label": "↘ end",
+        "triggers": [
+          "line end",
+          "end of line",
+          "end key",
+          "fine riga"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "page up",
+        "say_it": "pagina su",
+        "out": "⇞",
+        "label": "⇞ page up",
+        "triggers": [
+          "page up",
+          "pageup",
+          "pagina su"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "page down",
+        "say_it": "pagina giù",
+        "out": "⇟",
+        "label": "⇟ page down",
+        "triggers": [
+          "page down",
+          "pagedown",
+          "pagina giù"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "space",
+        "say_it": "space",
+        "out": " ",
+        "label": "␣ space",
+        "triggers": [
+          "space",
+          "spacebar",
+          "space bar",
+          "spazio"
         ],
         "pair": null,
         "role": null
@@ -707,6 +831,7 @@
         "label": "## heading",
         "triggers": [
           "heading two",
+          "heading 2",
           "subheading",
           "sub heading",
           "sottotitolo"
@@ -721,6 +846,7 @@
         "label": "### heading",
         "triggers": [
           "heading three",
+          "heading 3",
           "sub subheading"
         ],
         "pair": null,
@@ -979,6 +1105,21 @@
           "redo",
           "rifai",
           "ripeti"
+        ],
+        "pair": null,
+        "role": null
+      },
+      {
+        "say": "backword",
+        "say_it": "backword",
+        "out": "⌫ word(s)",
+        "label": "⌫ word(s)",
+        "triggers": [
+          "backword",
+          "backwords",
+          "backward",
+          "backwards",
+          "back word"
         ],
         "pair": null,
         "role": null

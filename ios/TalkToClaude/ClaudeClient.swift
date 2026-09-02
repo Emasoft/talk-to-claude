@@ -87,6 +87,34 @@ final class ClaudeClient: ObservableObject {
         _ = try? await URLSession.shared.data(for: req)
     }
 
+    /// Tap a command tag → POST its phrase to /command; the server interprets + injects it
+    /// (or logs under dry-run), exactly as if spoken.
+    func sendCommand(_ phrase: String) async {
+        await postJSON("/command", ["session": settings.session, "phrase": phrase])
+    }
+
+    /// Send a composed markdown block → POST /paste (multiline, injected without submitting).
+    func sendPaste(_ text: String) async {
+        await postJSON("/paste", ["session": settings.session, "text": text])
+    }
+
+    private func postJSON(_ path: String, _ body: [String: Any]) async {
+        guard let url = URL(string: "http://\(settings.macIP):\(settings.portNumber)\(path)") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        req.setValue("Bearer \(settings.token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (_, resp) = try await URLSession.shared.data(for: req)
+            if let code = (resp as? HTTPURLResponse)?.statusCode, code != 200 {
+                lastError = "\(path) failed (HTTP \(code))"
+            }
+        } catch {
+            lastError = "\(path) — \(error.localizedDescription)"
+        }
+    }
 }
 
 private struct SessionsResponse: Decodable {

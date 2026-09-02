@@ -1082,8 +1082,9 @@ def looks_like_hallucination(text: str) -> bool:
     return t in _HALLUCINATIONS
 
 
-_KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "Escape": "esc", "BSpace": "⌫",
-              "Newline": "⇧⏎", "Up": "↑", "Down": "↓"}
+_KEY_GLYPH = {"Enter": "⏎", "Tab": "⇥", "BTab": "⇤", "Escape": "esc", "BSpace": "⌫",
+              "DC": "⌦", "Newline": "⇧⏎", "Up": "↑", "Down": "↓", "Left": "←",
+              "Right": "→", "Home": "↖", "End": "↘", "PPage": "⇞", "NPage": "⇟"}
 
 
 def _rule_out(r: dict) -> str:
