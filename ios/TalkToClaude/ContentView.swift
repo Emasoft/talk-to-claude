@@ -123,7 +123,9 @@ struct ContentView: View {
     }
 
     // Glass-chip palette (the ffflux background lives in FluxBackground).
-    static let glassYellow = Color(hue: 0.13, saturation: 0.55, brightness: 1.0)
+    // Bright near-white yellow: low saturation so it reads almost white, but still a
+    // distinct warm hue vs the pure-white output side of a tag.
+    static let glassYellow = Color(hue: 0.14, saturation: 0.32, brightness: 1.0)
     static let chipSay = Color(red: 0.05, green: 0.08, blue: 0.20)   // very dark navy (phrase side)
     static let chipOut = Color(red: 0.38, green: 0.52, blue: 0.70)   // neutral steel (output side)
     static let chipOpen = Color(red: 0.18, green: 0.55, blue: 0.36)  // green tone: open / start
@@ -303,13 +305,16 @@ struct ContentView: View {
             let groups = chipGroups(singles)
             // iPad chips are BIG buttons — ~3× the compact iPhone font. Italian phrases run
             // longer, so the iPhone compact size shrinks a touch.
-            let font: CGFloat = tall ? 30 : (italian ? 8 : 9.5)
-            // Group/pair cells are a fixed width that fits inside ONE column slot (below),
-            // so grouped and solo chips line up in clean left-justified columns.
-            let pairW: CGFloat = tall ? 320 : (italian ? 168 : 150)
-            // Column count tracks the available WIDTH. Slot ~360pt (a hair wider than pairW)
-            // so each group occupies exactly one column. iPhone tight-wraps (columns: 0).
-            let cols = tall ? max(2, min(6, Int(geo.size.width / 360))) : 0
+            let font: CGFloat = tall ? 25 : (italian ? 8 : 9.5)
+            // EVERY tag is the SAME width — solo, grouped, and mode-pair alike — so they
+            // line up as identical buttons in clean columns. iPad width is sized so 2–3
+            // columns fit while still fitting the longest label ("START REPLACE MODE").
+            let tagW: CGFloat = tall ? 330 : (italian ? 168 : 150)
+            let tagGap: CGFloat = tall ? 8 : 3
+            // Fixed columns on BOTH platforms; FlowLayout MASONRY-packs each column
+            // independently (shortest-column first) so tall groups next to short singles
+            // leave NO vertical holes.
+            let cols = max(1, Int((geo.size.width - 20) / (tagW + tagGap)))
             VStack(spacing: 0) {
               if settings.prefixMode { prefixBanner }
               ScrollView {
@@ -322,15 +327,15 @@ struct ContentView: View {
                     // the column count follows the pane width. LEFT-justified so the big
                     // buttons align in clean left-edged columns. The iPhone tight-packs
                     // (columns: 0) to fit its small screen.
-                    FlowLayout(spacing: tall ? 8 : 3, columns: cols, rightAligned: false) {
+                    FlowLayout(spacing: tagGap, columns: cols, rightAligned: false) {
                         ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
                             if g.count == 1 {
-                                singleCell(g[0], fontSize: font)
+                                singleCell(g[0], fontSize: font, width: tagW)
                             } else {
-                                clusterCell(g, fontSize: font, width: pairW)
+                                clusterCell(g, fontSize: font, width: tagW)
                             }
                         }
-                        ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
+                        ForEach(pairs) { pairCell($0, fontSize: font, width: tagW) }
                     }
                     .padding(10)
                     .frame(maxWidth: .infinity, minHeight: geo.size.height - (settings.prefixMode ? 40 : 0), alignment: .leading)
@@ -434,12 +439,12 @@ struct ContentView: View {
 
     /// Bicolor chip: phrase (dark-indigo glass) and output (steel glass) meet along a
     /// diagonal slant, wrapped in glass chrome (frosted material + lit edge + shadow).
-    private func singleCell(_ item: CheatItem, fontSize: CGFloat) -> some View {
+    private func singleCell(_ item: CheatItem, fontSize: CGFloat, width: CGFloat) -> some View {
         glassChrome(
             slantBicolor(say: italian ? item.sayIt : item.say, out: item.out, outColor: toneColor(for: item),
-                         fontSize: fontSize, sayFills: false)
+                         fontSize: fontSize, sayFills: true)
+                .frame(width: width)
         )
-        .fixedSize()
     }
 
     /// A mode rendered as one fixed-width cell sharing the glass chrome: START on top
@@ -471,7 +476,7 @@ struct ContentView: View {
             Text(say)
                 .fontWeight(.semibold).foregroundStyle(Self.glassYellow)
                 .font(.system(size: fontSize)).lineLimit(1)
-                .minimumScaleFactor(sayFills ? 0.6 : 1)   // singles never scale; only fixed-width pairs may
+                .minimumScaleFactor(0.85)   // keep sizes near-uniform; tiny safety for the longest labels
                 .frame(maxWidth: sayFills ? .infinity : nil, alignment: .leading)
                 .padding(.leading, 11).padding(.trailing, slant + 8).padding(.vertical, 4)
                 .background(Self.chipSay.opacity(0.62))
@@ -874,23 +879,19 @@ struct FlowLayout: Layout {
         var y: CGFloat = 0, rowH: CGFloat = 0, widest: CGFloat = 0
 
         if columns > 0 && maxWidth.isFinite {
-            // Column-snapped: a slot is 1/N of the width; chips occupy whole slots.
-            // Right-aligned, each chip sits at the RIGHT of its span so the output
-            // symbols line up down each column.
+            // MASONRY: every chip is one slot wide; place each in the SHORTEST column so
+            // tall groups and short singles interleave with NO vertical holes. Left-packed.
             let slotW = (maxWidth + spacing) / CGFloat(columns)
-            var col = 0
+            var colY = Array(repeating: CGFloat(0), count: columns)
             for (i, sv) in subviews.enumerated() {
                 let s = sv.sizeThatFits(.unspecified)
-                let span = min(columns, max(1, Int(ceil((s.width + spacing) / slotW))))
-                if col + span > columns { col = 0; y += rowH + spacing; rowH = 0 }
-                let x = rightAligned
-                    ? CGFloat(col + span) * slotW - spacing - s.width
-                    : CGFloat(col) * slotW
-                spots.append((i, x, y, s))
-                col += span
-                rowH = max(rowH, s.height)
+                var col = 0
+                for c in 1..<columns where colY[c] < colY[col] - 0.5 { col = c }
+                spots.append((i, CGFloat(col) * slotW, colY[col], s))
+                colY[col] += s.height + spacing
             }
-            return (maxWidth, y + rowH, spots)
+            let maxH = colY.max() ?? 0
+            return (maxWidth, max(0, maxH - spacing), spots)
         }
 
         // Tight wrap: pack chips left-to-right, wrapping when out of room.
