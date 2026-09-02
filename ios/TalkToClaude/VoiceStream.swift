@@ -17,6 +17,9 @@ final class VoiceStream: ObservableObject {
     @Published var capsMode = "none"  // "none" | "upper" | "lower"
     @Published var editMode = ""      // "" | "delete" | "replace_find" | "replace_with"
     @Published var symbolsMode = false // prefix-mode "command symbols" burst is active
+    // Set when we can't reach a Tailscale server IP and never connected this session —
+    // drives the app's "Open Tailscale" call-to-action so the user can switch the VPN on.
+    @Published var tailscaleOffLikely = false
 
     private let settings: AppSettings
     // A long-lived WebSocket: the server only sends data back WHEN you speak, so a long
@@ -36,6 +39,9 @@ final class VoiceStream: ObservableObject {
     private nonisolated(unsafe) var liveTask: URLSessionWebSocketTask?
     private var wantListening = false   // user intent — drives auto-reconnect on a drop
     private var reconnectAttempts = 0
+    // Whether the socket reached "ready" at least once THIS session. Distinguishes
+    // "never reached the server" (usually Tailscale/VPN off) from a mid-session drop.
+    private var everConnected = false
 
     init(settings: AppSettings) {
         self.settings = settings
@@ -53,6 +59,8 @@ final class VoiceStream: ObservableObject {
     func start(session: String) {
         wantListening = true
         reconnectAttempts = 0
+        everConnected = false
+        tailscaleOffLikely = false
         finals.removeAll()
         connect(session: session)
     }
@@ -67,7 +75,7 @@ final class VoiceStream: ObservableObject {
         let t = urlSession.webSocketTask(with: url)
         task = t
         liveTask = t
-        lastError = ""
+        if reconnectAttempts == 0 { lastError = "" }   // keep a reconnect hint visible across retries
         listening = true
         status = reconnectAttempts == 0 ? "Connecting…" : "Reconnecting…"
         t.resume()
@@ -103,6 +111,7 @@ final class VoiceStream: ObservableObject {
         capsMode = "none"
         editMode = ""
         symbolsMode = false
+        tailscaleOffLikely = false
         liveTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
@@ -159,11 +168,22 @@ final class VoiceStream: ObservableObject {
     private func scheduleReconnect() {
         guard wantListening else { return }
         reconnectAttempts += 1
+        // Never reached the server AND the target is a Tailscale VPN address → the usual
+        // cause is Tailscale being OFF on this device. Say so on the FIRST failure rather
+        // than after 8 silent retries. A mid-session drop (everConnected == true) keeps
+        // the quiet "Reconnecting…" so a brief server restart doesn't cry "VPN off".
+        let tailscaleHint = !everConnected && looksLikeTailscale(settings.macIP)
+        tailscaleOffLikely = tailscaleHint
+        if tailscaleHint {
+            lastError = "Can’t reach \(settings.macIP) — that’s a Tailscale address. Is Tailscale (VPN) ON on this device? (And is the server running on the Mac?)"
+        }
         if reconnectAttempts > 8 {
             listening = false
             wantListening = false
             status = "Disconnected — tap the mic to retry"
-            lastError = "Lost the connection to the Mac and couldn't reconnect — is the server running?"
+            lastError = tailscaleHint
+                ? "Couldn’t reach \(settings.macIP) (a Tailscale IP). Turn Tailscale ON on this device and the Mac, then tap the mic."
+                : "Lost the connection to the Mac and couldn't reconnect — is the server running?"
             return
         }
         status = "Reconnecting…"
@@ -175,6 +195,18 @@ final class VoiceStream: ObservableObject {
         }
     }
 
+    /// True if `host` is a Tailscale VPN address — IPv4 CGNAT 100.64.0.0/10 (the range
+    /// Tailscale hands out; NOT every 100.x) or the Tailscale IPv6 ULA prefix
+    /// fd7a:115c:a1e0::/48. Only used to phrase the "can't connect" hint — it never
+    /// blocks or alters a connection attempt.
+    private func looksLikeTailscale(_ host: String) -> Bool {
+        if host.lowercased().hasPrefix("fd7a:115c:a1e0") { return true }   // Tailscale IPv6 ULA
+        let p = host.split(separator: ".")
+        if p.count == 4, let a = Int(p[0]), let b = Int(p[1]),
+           a == 100, (64...127).contains(b) { return true }               // 100.64.0.0/10
+        return false
+    }
+
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -182,6 +214,8 @@ final class VoiceStream: ObservableObject {
         switch type {
         case "ready":
             connected = true
+            everConnected = true
+            tailscaleOffLikely = false
             reconnectAttempts = 0   // a successful (re)connect clears the backoff + any error
             lastError = ""
             status = "Listening…"

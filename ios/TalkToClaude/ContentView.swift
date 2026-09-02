@@ -140,6 +140,17 @@ struct ContentView: View {
         AudioServicesPlaySystemSound(1104)   // soft keyboard-tap click
     }
 
+    /// Deep-link into the Tailscale app so the user can switch the VPN on (iOS can't
+    /// enable a VPN programmatically — only the Tailscale app can, with user consent).
+    /// Falls back to the App Store if Tailscale isn't installed.
+    private func openTailscale() {
+        UIApplication.shared.open(URL(string: "tailscale://")!) { ok in
+            if !ok, let store = URL(string: "https://apps.apple.com/app/tailscale/id1470499037") {
+                UIApplication.shared.open(store)
+            }
+        }
+    }
+
     private func toggleMic() {
         if voice.listening {
             audio.stop()
@@ -477,6 +488,31 @@ struct ContentView: View {
                         .font(.subheadline.weight(.bold)).foregroundStyle(.red)
                         .lineLimit(1).truncationMode(.tail)
                 }
+            }
+            // Tailscale call-to-action — shown when the server IP is a Tailscale address
+            // we can't reach: invite the user to open Tailscale and switch the VPN on.
+            if voice.tailscaleOffLikely {
+                Button { tapFeedback(); openTailscale() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "network.badge.shield.half.filled")
+                            .font(.system(size: 15, weight: .bold))
+                        Text("Tailscale looks OFF — tap to open it and turn the VPN on")
+                            .font(.caption.weight(.semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(.system(size: 15, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.orange.opacity(0.22),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.65), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
             }
             // Row 2 — transcript, full width.
             transcriptView(lines: transcriptLines)
