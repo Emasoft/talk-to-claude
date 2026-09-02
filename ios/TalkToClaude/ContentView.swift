@@ -111,9 +111,6 @@ struct ContentView: View {
         .onChange(of: settings.autoSend) { _, on in
             if voice.listening { voice.sendControl(autoSend: on) }
         }
-        .onChange(of: settings.correct) { _, on in
-            if voice.listening { voice.sendControl(correct: on) }
-        }
     }
 
     // Glass-chip palette (the ffflux background lives in FluxBackground).

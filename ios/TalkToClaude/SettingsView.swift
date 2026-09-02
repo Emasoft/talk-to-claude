@@ -94,7 +94,6 @@ struct SettingsView: View {
                     } label: {
                         Label("Command grammar", systemImage: "text.book.closed")
                     }
-                    Toggle("Clean up with AI", isOn: $settings.correct)
                 } header: {
                     Text("Voice")
                 } footer: {
@@ -102,7 +101,7 @@ struct SettingsView: View {
                         Text(settings.prefixMode
                             ? "Prefix ON: everything is typed literally — a command fires only when you say “command” first (e.g. “command enter”). Wrap many with “command start … command stop”. See Command grammar above."
                             : "Prefix OFF (default): command words convert automatically (“slash” → /, “enter” → ⏎). Faster for symbols, but common words can get caught.")
-                        Text("“Clean up with AI” runs a small local model over each transcription to fix mis-heard technical terms and homophones (~0.4s slower). All toggles apply live to the running mic.")
+                        Text("Every transcription is automatically cleaned up on-device (mis-heard technical terms, homophones) as part of the pipeline. All settings apply live to the running mic.")
                     }
                 }
 
