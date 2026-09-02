@@ -298,14 +298,18 @@ struct ContentView: View {
             let all = voice.cheatGroups.flatMap { $0.items }
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
+            // Group related/opposite commands (arrows, undo/redo, open/close brackets, …)
+            // into vertically-stacked cells so they read as one unit; lone chips stay solo.
+            let groups = chipGroups(singles)
             // iPad chips are BIG buttons — ~3× the compact iPhone font. Italian phrases run
             // longer, so the iPhone compact size shrinks a touch.
             let font: CGFloat = tall ? 30 : (italian ? 8 : 9.5)
-            let pairW: CGFloat = tall ? 480 : (italian ? 168 : 150)
-            // Column count tracks the available WIDTH. With the big iPad buttons a slot is
-            // ~340pt, so a narrow Split-View pane reflows to fewer (but full-size) columns.
-            // The iPhone tight-wraps (columns: 0).
-            let cols = tall ? max(2, min(6, Int(geo.size.width / 340))) : 0
+            // Group/pair cells are a fixed width that fits inside ONE column slot (below),
+            // so grouped and solo chips line up in clean left-justified columns.
+            let pairW: CGFloat = tall ? 320 : (italian ? 168 : 150)
+            // Column count tracks the available WIDTH. Slot ~360pt (a hair wider than pairW)
+            // so each group occupies exactly one column. iPhone tight-wraps (columns: 0).
+            let cols = tall ? max(2, min(6, Int(geo.size.width / 360))) : 0
             VStack(spacing: 0) {
               if settings.prefixMode { prefixBanner }
               ScrollView {
@@ -319,7 +323,13 @@ struct ContentView: View {
                     // buttons align in clean left-edged columns. The iPhone tight-packs
                     // (columns: 0) to fit its small screen.
                     FlowLayout(spacing: tall ? 8 : 3, columns: cols, rightAligned: false) {
-                        ForEach(singles) { singleCell($0, fontSize: font) }
+                        ForEach(Array(groups.enumerated()), id: \.offset) { _, g in
+                            if g.count == 1 {
+                                singleCell(g[0], fontSize: font)
+                            } else {
+                                clusterCell(g, fontSize: font, width: pairW)
+                            }
+                        }
                         ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
                     }
                     .padding(10)
@@ -371,6 +381,55 @@ struct ContentView: View {
             guard let e = byName[name], let s = e.start, let t = e.stop else { return nil }
             return ModePair(id: name, start: s, middle: e.middle, stop: t)
         }
+    }
+
+    /// Which vertical cluster a standalone chip belongs to — opposites and same-function
+    /// commands share a key so they render stacked as one group. Keyed on the English
+    /// `say` (language-independent). nil → the chip stays solo.
+    private func clusterKey(for item: CheatItem) -> String? {
+        switch item.say.lowercased() {
+        case "enter", "new line":                              return "return"
+        case "arrow up", "arrow down":                         return "arrows"
+        case "undo", "redo":                                   return "history"
+        case "open quotes", "close quotes":                    return "dquotes"
+        case "open code block", "close code block":            return "fence"
+        case "open parentheses", "close parentheses":          return "paren"
+        case "open square brackets", "close square brackets":  return "square"
+        case "open curly braces", "close curly braces":        return "curly"
+        case "less than", "greater than":                      return "angle"
+        case "heading", "heading two", "heading three":        return "headings"
+        case "bold", "italic", "strikethrough":                return "emphasis"
+        default:                                               return nil
+        }
+    }
+
+    /// Partition chips into ordered groups: related chips (same clusterKey) collect into
+    /// one multi-item group, everything else is its own singleton. First-appearance order
+    /// is preserved so the layout stays stable.
+    private func chipGroups(_ items: [CheatItem]) -> [[CheatItem]] {
+        var order: [String] = []
+        var buckets: [String: [CheatItem]] = [:]
+        for (i, it) in items.enumerated() {
+            let key = clusterKey(for: it) ?? "solo-\(i)"
+            if buckets[key] == nil { order.append(key) }
+            buckets[key, default: []].append(it)
+        }
+        return order.map { buckets[$0]! }
+    }
+
+    /// A cluster of related chips rendered as one fixed-width cell: each member on its own
+    /// row, tinted by role (open=green, close=red, else steel), sharing the glass chrome —
+    /// so opposites/related commands read as a single vertical group.
+    private func clusterCell(_ items: [CheatItem], fontSize: CGFloat, width: CGFloat) -> some View {
+        glassChrome(
+            VStack(spacing: 1) {
+                ForEach(items) { it in
+                    slantBicolor(say: italian ? it.sayIt : it.say, out: it.out,
+                                 outColor: toneColor(for: it), fontSize: fontSize, sayFills: true)
+                }
+            }
+            .frame(width: width)
+        )
     }
 
     /// Bicolor chip: phrase (dark-indigo glass) and output (steel glass) meet along a
