@@ -818,6 +818,16 @@ class UtteranceSegmenter:
         self._silence_run = 0
         self._speech_win = 0
 
+    def flush(self):
+        """Force-close the in-flight utterance (the user tapped stop) and return its
+        audio if enough speech was captured, else None — so nothing spoken before the
+        pause is lost. Resets state afterward."""
+        finished = None
+        if self._speaking and self._speech_win >= self.min_speech_win and self._utt:
+            finished = np.concatenate(self._utt).astype(np.float32)
+        self._reset()
+        return finished
+
 
 # parakeet_mlx is an OPTIONAL backend dependency, imported lazily so the default
 # Whisper-only install runs without it. Cached after the first successful import.
@@ -1219,6 +1229,81 @@ async def handle_stream(request):
           f"hold={silence_hold}s auto_send={auto_send} prefix_mode={prefix_mode} "
           f"correct={correct} biased={bool(context)}", file=sys.stderr)
 
+    async def handle_utterance(utt):
+        """Transcribe ONE finished utterance and emit its result. Shared by the live
+        segmenter (silence-ended) and the flush path (user tapped stop) so both behave
+        identically. Reassigns noise_run → nonlocal; reads the live session/correct/
+        prefix_mode/auto_send by closure so mid-stream reconfig is honored."""
+        nonlocal noise_run
+        # ── audio health: AUTOFIX faint speech by normalizing its level, and warn ──
+        rms = _loudness(utt)
+        if 0 < rms < _FAINT_RMS:
+            if rms >= _VERY_FAINT_RMS:
+                utt = np.clip(utt * min(_GAIN_TARGET_RMS / rms, _GAIN_MAX), -1.0, 1.0)
+                await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
+                    "message": "Your voice is faint — I boosted it, but move closer to the mic for best accuracy."})
+            else:
+                await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
+                    "message": "Barely any voice detected — move much closer to the mic and speak up."})
+        # Tell the app the utterance ended and we're decoding, so it can drop the REC
+        # indicator and show "Transcribing…" immediately instead of after the ASR latency.
+        await ws.send_json({"type": "transcribing"})
+        try:
+            text = await loop.run_in_executor(ASR_EXECUTOR, transcribe_utterance, utt, context)
+        except Exception as e:  # noqa: BLE001 - report, don't drop the stream
+            await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
+            return
+        # ── audio health: VAD fired but recognizer returned nothing → noise. 3 = noisy. ──
+        if not text:
+            noise_run += 1
+            if noise_run == 3:
+                await ws.send_json({"type": "diagnostic", "code": "noisy", "level": "warn",
+                    "message": "Background noise is drowning your voice. Try noise-cancelling earbuds, "
+                               "or turn on Voice Isolation (Control Center → Mic Mode)."})
+        else:
+            noise_run = 0
+        if text and correct:
+            # Fix ASR mis-transcriptions before command interpretation + injection.
+            # Best-effort: on failure keep the raw text.
+            raw_text = text
+            try:
+                text = await loop.run_in_executor(ASR_EXECUTOR, correct_text, text)
+            except Exception as e:  # noqa: BLE001
+                print(f"[stream] correction failed (using raw): {e}", file=sys.stderr)
+            if text != raw_text:
+                print(f"[stream] corrected: {raw_text!r} -> {text!r}", file=sys.stderr)
+        if not text:
+            await ws.send_json({"type": "final", "text": ""})
+            return
+        before = _snapshot_modes(modes)   # for change-detect + rollback
+        actions = interpret(text, modes, prefix_mode=prefix_mode)
+        if auto_send and not (actions and actions[-1] == ("key", "Enter")):
+            actions = actions + [("key", "Enter")]
+            _reset_line(modes)            # auto-submitted -> no longer editable
+        if dry_run:
+            ok, err = True, None          # self-test / --dry-run: never touch a real session
+            if FORCE_DRY_RUN:             # server-wide dry-run: record the utterance
+                _dry_log(text)
+        else:
+            ok, err = await execute_actions(session, actions)
+            if not ok:
+                _restore_modes(modes, before)  # C7: revert the optimistic edit
+        await ws.send_json(
+            {"type": "final", "text": text, "rendered": render(actions),
+             "line": modes.get("line", ""), "injected": ok}
+            | ({} if ok else {"error": err})
+        )
+        now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
+               modes.get("edit_mode"),
+               bool(modes.get("sym_mode")) or bool(modes.get("num_region")))
+        was = (bool(before["spelling"]), before["case_mode"], before["edit_mode"],
+               bool(before.get("sym_mode")) or bool(before.get("num_region")))
+        if now != was:
+            await ws.send_json({"type": "mode", "spell": now[0], "caps": now[1],
+                                "edit": now[2], "symbols": now[3]})
+        print(f"[stream] -> {session}: {text!r} => {render(actions)!r} ok={ok}",
+              file=sys.stderr)
+
     try:
         async for msg in ws:
             if msg.type == WSMsgType.BINARY:
@@ -1247,74 +1332,7 @@ async def handle_stream(request):
                 for ev in events:
                     await ws.send_json({"type": ev})
                 if utt is not None:
-                    # ── audio health: AUTOFIX faint speech by normalizing its level, and warn ──
-                    rms = _loudness(utt)
-                    if 0 < rms < _FAINT_RMS:
-                        if rms >= _VERY_FAINT_RMS:
-                            utt = np.clip(utt * min(_GAIN_TARGET_RMS / rms, _GAIN_MAX), -1.0, 1.0)
-                            await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
-                                "message": "Your voice is faint — I boosted it, but move closer to the mic for best accuracy."})
-                        else:
-                            await ws.send_json({"type": "diagnostic", "code": "low_voice", "level": "warn",
-                                "message": "Barely any voice detected — move much closer to the mic and speak up."})
-                    try:
-                        text = await loop.run_in_executor(
-                            ASR_EXECUTOR, transcribe_utterance, utt, context
-                        )
-                    except Exception as e:  # noqa: BLE001 - report, don't drop the stream
-                        await ws.send_json({"type": "error", "error": f"transcribe failed: {e}"})
-                        continue
-                    # ── audio health: the VAD fired (energy present) but the recognizer
-                    #    returned nothing → that was noise, not speech. 3 in a row = noisy. ──
-                    if not text:
-                        noise_run += 1
-                        if noise_run == 3:
-                            await ws.send_json({"type": "diagnostic", "code": "noisy", "level": "warn",
-                                "message": "Background noise is drowning your voice. Try noise-cancelling earbuds, "
-                                           "or turn on Voice Isolation (Control Center → Mic Mode)."})
-                    else:
-                        noise_run = 0
-                    if text and correct:
-                        # Fix ASR mis-transcriptions before command interpretation +
-                        # injection. Best-effort: on failure keep the raw text.
-                        raw_text = text
-                        try:
-                            text = await loop.run_in_executor(ASR_EXECUTOR, correct_text, text)
-                        except Exception as e:  # noqa: BLE001
-                            print(f"[stream] correction failed (using raw): {e}", file=sys.stderr)
-                        if text != raw_text:
-                            print(f"[stream] corrected: {raw_text!r} -> {text!r}", file=sys.stderr)
-                    if text:
-                        before = _snapshot_modes(modes)   # for change-detect + rollback
-                        actions = interpret(text, modes, prefix_mode=prefix_mode)
-                        if auto_send and not (actions and actions[-1] == ("key", "Enter")):
-                            actions = actions + [("key", "Enter")]
-                            _reset_line(modes)            # auto-submitted -> no longer editable
-                        if dry_run:
-                            ok, err = True, None          # self-test / --dry-run: never touch a real session
-                            if FORCE_DRY_RUN:             # server-wide dry-run: record the utterance
-                                _dry_log(text)
-                        else:
-                            ok, err = await execute_actions(session, actions)
-                            if not ok:
-                                _restore_modes(modes, before)  # C7: revert the optimistic edit
-                        await ws.send_json(
-                            {"type": "final", "text": text, "rendered": render(actions),
-                             "line": modes.get("line", ""), "injected": ok}
-                            | ({} if ok else {"error": err})
-                        )
-                        now = (bool(modes.get("spelling")), modes.get("case_mode", "none"),
-                               modes.get("edit_mode"),
-                               bool(modes.get("sym_mode")) or bool(modes.get("num_region")))
-                        was = (bool(before["spelling"]), before["case_mode"], before["edit_mode"],
-                               bool(before.get("sym_mode")) or bool(before.get("num_region")))
-                        if now != was:
-                            await ws.send_json({"type": "mode", "spell": now[0], "caps": now[1],
-                                                "edit": now[2], "symbols": now[3]})
-                        print(f"[stream] -> {session}: {text!r} => {render(actions)!r} ok={ok}",
-                              file=sys.stderr)
-                    else:
-                        await ws.send_json({"type": "final", "text": ""})
+                    await handle_utterance(utt)
             elif msg.type == WSMsgType.TEXT:
                 # Live reconfiguration — switch the target Claude or toggle prefix mode
                 # WITHOUT reconnecting (instant; no slow WS re-handshake + re-validate).
@@ -1340,6 +1358,14 @@ async def handle_stream(request):
                     print(f"[stream] reconfigured -> session={session!r} "
                           f"prefix_mode={prefix_mode} auto_send={auto_send} correct={correct}",
                           file=sys.stderr)
+                elif upd.get("type") == "flush":
+                    # The user tapped stop — force-close and transcribe the in-flight
+                    # utterance so nothing captured before the pause is lost, then ack so
+                    # the client can close cleanly.
+                    pending = seg.flush()
+                    if pending is not None:
+                        await handle_utterance(pending)
+                    await ws.send_json({"type": "flushed"})
                 continue
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.ERROR):
                 break

@@ -111,6 +111,11 @@ struct ContentView: View {
         .onChange(of: settings.autoSend) { _, on in
             if voice.listening { voice.sendControl(autoSend: on) }
         }
+        // Success haptic the moment the server is READY — the cue to start speaking, so
+        // the user doesn't talk during startup and lose the first words.
+        .onChange(of: voice.connected) { _, ready in
+            if ready { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        }
     }
 
     // Glass-chip palette (the ffflux background lives in FluxBackground).
@@ -155,6 +160,7 @@ struct ContentView: View {
             UIApplication.shared.isIdleTimerDisabled = false
         } else {
             audio.onPCM = { [weak voice] data in voice?.sendPCM(data) }
+            audio.onLevel = { [weak voice] lvl in voice?.reportLevel(lvl) }
             do {
                 try audio.start()
                 voice.start(session: settings.session)
@@ -470,8 +476,7 @@ struct ContentView: View {
             HStack(spacing: 9) {
                 statusLabel(voice.connected ? "CONNECTED" : "OFFLINE",
                             color: voice.connected ? .green : .gray)
-                statusLabel(voice.speaking ? "REC" : (voice.listening ? "LISTENING" : "IDLE"),
-                            color: voice.speaking ? .red : (voice.listening ? .orange : .gray))
+                phaseChip()
                 if voice.capsMode == "upper" { modeBadge("CAPS", .orange) }
                 if voice.capsMode == "lower" { modeBadge("abc", .blue) }
                 if voice.spellMode { modeBadge("SPELL", .purple) }
@@ -485,6 +490,11 @@ struct ContentView: View {
                         .font(.subheadline.weight(.bold)).foregroundStyle(.red)
                         .lineLimit(1).truncationMode(.tail)
                 }
+            }
+            // Live mic level — instant visual feedback that audio is being captured,
+            // even before any text is decoded.
+            if voice.listening || voice.transcribing {
+                levelMeter
             }
             // Tailscale call-to-action — shown when the server IP is a Tailscale address
             // we can't reach: invite the user to open Tailscale and switch the VPN on.
@@ -546,6 +556,47 @@ struct ContentView: View {
             Circle().fill(color).frame(width: 9, height: 9)
             Text(text).font(.subheadline.weight(.bold)).foregroundStyle(color)
         }
+    }
+
+    /// The mic lifecycle, derived from VoiceStream's flags — a single source of truth so
+    /// the label can't disagree with the button.
+    private enum MicPhase { case idle, starting, ready, hearing, transcribing }
+    private var micPhase: MicPhase {
+        if voice.transcribing { return .transcribing }   // also covers the flush "Finishing…"
+        if voice.speaking { return .hearing }
+        if voice.listening { return voice.connected ? .ready : .starting }
+        return .idle
+    }
+
+    /// Phase chip — replaces the old REC/LISTENING/IDLE label with an explicit lifecycle
+    /// so the user knows when the system is still warming up vs ready to speak.
+    private func phaseChip() -> some View {
+        let (text, color): (String, Color) = {
+            switch micPhase {
+            case .idle:         return ("IDLE", .gray)
+            case .starting:     return ("STARTING…", .yellow)
+            case .ready:        return ("READY — SPEAK", .green)
+            case .hearing:      return ("REC", .red)
+            case .transcribing: return ("TRANSCRIBING…", .teal)
+            }
+        }()
+        return statusLabel(text, color: color)
+    }
+
+    /// Slim live input-level meter (green→orange fill), driven by VoiceStream.level. Gives
+    /// instant "I hear you" feedback before any text is decoded.
+    private var levelMeter: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.12))
+                Capsule()
+                    .fill(LinearGradient(colors: [.green, .yellow, .orange],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(3, geo.size.width * CGFloat(min(1, max(0, voice.level)))))
+                    .animation(.linear(duration: 0.08), value: voice.level)
+            }
+        }
+        .frame(height: 6)
     }
 
     /// Finger-sized glass icon button with click + haptic feedback.

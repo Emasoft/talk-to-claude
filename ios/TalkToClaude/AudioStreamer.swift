@@ -10,6 +10,9 @@ import AVFoundation
 final class AudioStreamer {
     /// Called (on the audio thread) with little-endian PCM16 bytes at 16 kHz mono.
     var onPCM: ((Data) -> Void)?
+    /// Called (on the audio thread) with a normalized input level 0…1 per buffer —
+    /// drives the live volume meter so the user sees mic activity before any text.
+    var onLevel: ((Float) -> Void)?
 
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
@@ -106,7 +109,19 @@ final class AudioStreamer {
             return buffer
         }
         guard status != .error, out.frameLength > 0, let channel = out.int16ChannelData else { return }
-        let byteCount = Int(out.frameLength) * MemoryLayout<Int16>.size
+        let frames = Int(out.frameLength)
+        // Live level for the meter: RMS of this buffer, scaled so ordinary speech
+        // (~0.05–0.15 normalized RMS) fills most of the bar, clamped to 0…1. Cheap
+        // enough to run on the audio thread (~1k mults/buffer).
+        let samples = channel[0]
+        var sumSquares = 0.0
+        for i in 0..<frames {
+            let s = Double(samples[i]) / 32768.0
+            sumSquares += s * s
+        }
+        let rms = frames > 0 ? (sumSquares / Double(frames)).squareRoot() : 0
+        onLevel?(Float(min(1.0, rms * 8.0)))
+        let byteCount = frames * MemoryLayout<Int16>.size
         onPCM?(Data(bytes: channel[0], count: byteCount))
     }
 }

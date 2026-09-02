@@ -20,6 +20,14 @@ final class VoiceStream: ObservableObject {
     // Set when we can't reach a Tailscale server IP and never connected this session —
     // drives the app's "Open Tailscale" call-to-action so the user can switch the VPN on.
     @Published var tailscaleOffLikely = false
+    // Live mic input level 0…1 (from AudioStreamer, on the audio thread) for the meter.
+    @Published var level: Float = 0
+    // The utterance ended and the server is decoding it — shows "Transcribing…" between
+    // the pause and the decoded text so the ~1–2s ASR latency doesn't feel dead.
+    @Published var transcribing = false
+    // True while a user-initiated stop is flushing the in-flight utterance: we keep the
+    // socket open just long enough to receive that last final, then close.
+    private var flushClosePending = false
 
     private let settings: AppSettings
     // A long-lived WebSocket: the server only sends data back WHEN you speak, so a long
@@ -61,6 +69,9 @@ final class VoiceStream: ObservableObject {
         reconnectAttempts = 0
         everConnected = false
         tailscaleOffLikely = false
+        transcribing = false
+        flushClosePending = false
+        level = 0
         finals.removeAll()
         connect(session: session)
     }
@@ -100,12 +111,36 @@ final class VoiceStream: ObservableObject {
         receiveLoop()
     }
 
+    /// User tapped stop. FLUSH the in-flight utterance first: ask the server to
+    /// transcribe whatever it captured before the pause (so a half-spoken sentence isn't
+    /// lost), keep the socket open just long enough to receive that last final, then
+    /// close. Falls back to an immediate close if we weren't connected.
     func stop() {
         wantListening = false       // user-initiated — do NOT auto-reconnect
+        level = 0
+        speaking = false
+        guard connected, let t = task else { finishStop(); return }
+        flushClosePending = true
+        transcribing = true         // decoding the flushed utterance
+        listening = false
+        status = "Finishing…"
+        t.send(.string("{\"type\":\"flush\"}")) { _ in }
+        // Safety net: if no final/flushed arrives (e.g. nothing was buffered), close anyway.
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if self.flushClosePending { self.finishStop() }
+        }
+    }
+
+    /// Tear the socket down and reset all live state. The terminal step of stop().
+    private func finishStop() {
+        flushClosePending = false
         reconnectAttempts = 0
         listening = false
         speaking = false
+        transcribing = false
         connected = false
+        level = 0
         status = "Stopped"
         spellMode = false
         capsMode = "none"
@@ -115,6 +150,11 @@ final class VoiceStream: ObservableObject {
         liveTask = nil
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+    }
+
+    /// Report the live mic level (called on the audio thread) → publish on the main actor.
+    nonisolated func reportLevel(_ v: Float) {
+        Task { @MainActor in self.level = v }
     }
 
     /// Fire-and-forget PCM send. Safe to call from the real-time audio thread.
@@ -219,10 +259,18 @@ final class VoiceStream: ObservableObject {
             status = "Listening…"
         case "speech_start":
             speaking = true
+            transcribing = false
             status = "Hearing you…"
+        case "transcribing":
+            // Utterance ended; the server is decoding it. Drop the REC indicator and show
+            // progress so the ASR latency doesn't feel like a dead app.
+            speaking = false
+            transcribing = true
+            status = "Transcribing…"
         case "final":
             speaking = false
-            status = "Listening…"
+            transcribing = false
+            status = flushClosePending ? "Stopped" : "Listening…"
             if let line = obj["text"] as? String, !line.isEmpty {
                 finals.insert(line, at: 0)
                 if finals.count > 50 { finals.removeLast() }
@@ -233,6 +281,10 @@ final class VoiceStream: ObservableObject {
                 lastError = injected ? ""
                     : "Not delivered: \((obj["error"] as? String) ?? "tmux session unreachable")"
             }
+        case "flushed":
+            // Server finished the flush requested by stop() — the last final (if any) has
+            // already been delivered above, so it's safe to tear the socket down now.
+            if flushClosePending { finishStop() }
         case "error":
             lastError = (obj["error"] as? String) ?? "server error"
         case "cheatsheet":
