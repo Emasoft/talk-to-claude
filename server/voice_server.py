@@ -1408,6 +1408,11 @@ def main():
     os.makedirs(APP_DIR, exist_ok=True)
     if FORCE_DRY_RUN:
         os.makedirs(os.path.dirname(os.path.abspath(DRY_RUN_LOG)) or ".", exist_ok=True)
+        # Create the (empty) log at STARTUP, not lazily on the first utterance, so it
+        # exists immediately for tailing/inspection. Append-mode: never truncates an
+        # existing log. Fail-fast: an unwritable path raises here, not mid-stream.
+        with open(DRY_RUN_LOG, "a", encoding="utf-8"):
+            pass
 
     host = args.host or detect_tailscale_ip()
     no_tailscale = host is None
