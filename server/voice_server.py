@@ -1335,6 +1335,14 @@ async def handle_stream(request):
                 continue
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.CLOSING, WSMsgType.ERROR):
                 break
+    except ConnectionResetError as e:
+        # The client vanished mid-utterance (app backgrounded, network blip, Tailscale
+        # drop) while we were transcribing, so the pending send hit a closing transport.
+        # This is a NORMAL disconnect — aiohttp's ClientConnectionResetError subclasses
+        # the builtin ConnectionResetError — not a server fault. Log one line, don't let
+        # it bubble up as an "Error handling request" traceback.
+        print(f"[stream] client gone mid-send ({type(e).__name__}) — dropping utterance",
+              file=sys.stderr)
     finally:
         print("[stream] disconnected", file=sys.stderr)
     return ws
