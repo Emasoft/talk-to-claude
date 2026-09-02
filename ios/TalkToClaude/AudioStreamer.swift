@@ -34,7 +34,7 @@ final class AudioStreamer {
             try session.setCategory(
                 .playAndRecord,
                 mode: .voiceChat,
-                options: [.duckOthers, .defaultToSpeaker, .allowBluetooth]
+                options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP]
             )
             try session.setActive(true, options: .notifyOthersOnDeactivation)
 
