@@ -273,7 +273,7 @@ final class VoiceStream: ObservableObject {
             status = flushClosePending ? "Stopped" : "Listening…"
             if let line = obj["text"] as? String, !line.isEmpty {
                 finals.insert(line, at: 0)
-                if finals.count > 50 { finals.removeLast() }
+                if finals.count > 500 { finals.removeLast() }   // whole-session scrollback
             }
             // Surface tmux-injection failures: the words were heard but never
             // reached Claude (e.g. the target session was killed).

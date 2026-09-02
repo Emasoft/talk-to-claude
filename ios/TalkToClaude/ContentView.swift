@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showSearch = false
     @State private var showSessions: Bool     // collapsible Claude-session column
+    @AppStorage("transcriptHeight") private var transcriptHeight = 150.0  // resizable box
     @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
     @AppStorage("didCompleteOnboarding") private var didOnboard = false
     @Environment(\.scenePhase) private var scenePhase
@@ -47,8 +48,7 @@ struct ContentView: View {
                     VStack(spacing: 0) {
                         cheatSheet
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        // Transcript line count scales with screen height (min 3).
-                        bottomBar(transcriptLines: max(3, min(8, Int(geo.size.height / 200))))
+                        bottomBar()
                     }
                 }
                 // iPhone drawer: the sidebar floats OVER the chips (behind a tap-to-dismiss
@@ -440,7 +440,7 @@ struct ContentView: View {
 
     // MARK: - Compact bottom control bar
 
-    private func bottomBar(transcriptLines: Int) -> some View {
+    private func bottomBar() -> some View {
         VStack(alignment: .leading, spacing: 5) {
             // Row 0 — which Claude you're talking to: tab name + work dir (always
             // visible, even with the sidebar collapsed, so you know to switch if needed).
@@ -521,8 +521,8 @@ struct ContentView: View {
                 }
                 .buttonStyle(.plain)
             }
-            // Row 2 — transcript, full width.
-            transcriptView(lines: transcriptLines)
+            // Row 2 — the session transcript: a resizable, scrollable terminal-style box.
+            TranscriptView(lines: voice.finals, height: $transcriptHeight)
             // Row 3 — finger-sized controls.
             HStack(spacing: 12) {
                 Button { tapFeedback(); toggleMic() } label: {
@@ -628,26 +628,6 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    /// The last `lines` transcribed utterances — oldest at top, newest (bright) at the
-    /// bottom — padded with blanks so the row keeps a stable minimum height.
-    private func transcriptView(lines: Int) -> some View {
-        let recent = Array(voice.finals.prefix(lines))   // newest-first
-        return VStack(alignment: .leading, spacing: 1) {
-            ForEach(0..<lines, id: \.self) { r in
-                let ageFromNewest = (lines - 1) - r       // bottom row → 0 (newest)
-                let text = ageFromNewest < recent.count
-                    ? recent[ageFromNewest]
-                    : (ageFromNewest == 0 ? "—" : " ")
-                Text(text.isEmpty ? " " : text)
-                    .font(.caption2)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .foregroundStyle(ageFromNewest == 0 ? .primary : .secondary)
-                    .opacity(ageFromNewest == 0 ? 1.0 : max(0.4, 1.0 - Double(ageFromNewest) * 0.14))
-            }
-        }
-    }
-
     private func modeBadge(_ text: String, _ color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.bold))
@@ -659,6 +639,71 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+}
+
+/// Terminal-style session transcript: a resizable, drag-scrollable box (native iOS
+/// elastic bounce) showing every utterance of the session in monospaced text — oldest at
+/// the top, newest at the bottom and brightest, older lines fading. Auto-scrolls to the
+/// newest line as it arrives; drag the handle at the bottom to resize.
+struct TranscriptView: View {
+    let lines: [String]              // newest-first, as VoiceStream stores them
+    @Binding var height: Double
+
+    private let minHeight: Double = 90
+    private let maxHeight: Double = 460
+    private let bottomID = "transcript-bottom"
+    @State private var dragStart: Double? = nil
+
+    var body: some View {
+        let ordered = Array(lines.reversed())   // chronological: oldest → newest
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(alignment: .leading, spacing: 3) {
+                        if ordered.isEmpty {
+                            Text("— your transcript will appear here —")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.35))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        ForEach(Array(ordered.enumerated()), id: \.offset) { idx, line in
+                            let ageFromNewest = ordered.count - 1 - idx    // 0 = newest
+                            Text(line)
+                                .font(.system(.footnote, design: .monospaced))
+                                .foregroundStyle(.white.opacity(
+                                    ageFromNewest == 0 ? 1.0 : max(0.32, 1.0 - Double(ageFromNewest) * 0.12)))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        Color.clear.frame(height: 1).id(bottomID)
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                }
+                .onChange(of: lines.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+                }
+                .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) }
+            }
+            .frame(height: height)
+            .background(Color.black.opacity(0.38), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.white.opacity(0.18), lineWidth: 1))
+
+            // Drag handle to resize the box (clamped). Persists via the bound @AppStorage.
+            Capsule().fill(.white.opacity(0.35)).frame(width: 42, height: 5)
+                .padding(.vertical, 6).frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture()
+                        .onChanged { v in
+                            let base = dragStart ?? height
+                            if dragStart == nil { dragStart = height }
+                            height = min(maxHeight, max(minHeight, base + Double(v.translation.height)))
+                        }
+                        .onEnded { _ in dragStart = nil }
+                )
+        }
+    }
 }
 
 /// A mode toggle assembled from `pair`-tagged cheat items: start + stop, plus an
