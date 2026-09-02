@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var audio = AudioStreamer()
     @State private var showSettings = false
     @State private var showSearch = false
-    @State private var showSessions = true   // collapsible Claude-session column
+    @State private var showSessions: Bool     // collapsible Claude-session column
     @AppStorage("chipLangItalian") private var italian = false   // EN/IT chip toggle
     @AppStorage("didCompleteOnboarding") private var didOnboard = false
     @Environment(\.scenePhase) private var scenePhase
@@ -20,14 +20,26 @@ struct ContentView: View {
         _settings = StateObject(wrappedValue: s)
         _voice = StateObject(wrappedValue: VoiceStream(settings: s))
         _claude = StateObject(wrappedValue: ClaudeClient(settings: s))
+        // The sessions sidebar is an iPad-style split column. On a narrow iPhone it
+        // stole ~42% of the width, forcing the un-scalable cheat-sheet chips off the
+        // right edge. Default it OPEN only on iPad; the iPhone opens it via the ☰
+        // toggle. Idiom (not size class, which isn't known at init) avoids a first
+        // -frame flash.
+        _showSessions = State(initialValue: UIDevice.current.userInterfaceIdiom == .pad)
     }
 
     var body: some View {
         ZStack {
             FluxBackground().ignoresSafeArea()
             GeometryReader { geo in
+                let compact = hSize == .compact
                 HStack(spacing: 0) {
-                    if showSessions {
+                    // iPad (regular width): the sidebar is a permanent split column that
+                    // RESERVES width. iPhone (compact): it must NOT reserve width — doing
+                    // so shrank the un-scalable cheat-sheet chips until they clipped off
+                    // the right edge — so on compact it's rendered as the overlay drawer
+                    // below instead of inline here.
+                    if showSessions && !compact {
                         sessionsSidebar
                             .frame(width: min(240, max(150, geo.size.width * 0.42)))
                             .transition(.move(edge: .leading).combined(with: .opacity))
@@ -37,6 +49,23 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         // Transcript line count scales with screen height (min 3).
                         bottomBar(transcriptLines: max(3, min(8, Int(geo.size.height / 200))))
+                    }
+                }
+                // iPhone drawer: the sidebar floats OVER the chips (behind a tap-to-dismiss
+                // scrim) so opening it never steals width from — and never clips — the
+                // cheat-sheet. Selecting a session auto-closes it (see selectSession).
+                if showSessions && compact {
+                    Color.black.opacity(0.45)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.2)) { showSessions = false }
+                        }
+                    HStack(spacing: 0) {
+                        sessionsSidebar
+                            .frame(width: min(300, geo.size.width * 0.82))
+                            .transition(.move(edge: .leading))
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -220,6 +249,8 @@ struct ContentView: View {
         settings.session = s.target
         Task { await claude.focusSession(s.target) }   // bring its tab to the front on the Mac
         if voice.listening { voice.sendControl(session: s.target) }
+        // On iPhone the sidebar is a modal drawer — close it once a target is picked.
+        if hSize == .compact { withAnimation(.easeInOut(duration: 0.2)) { showSessions = false } }
     }
 
     /// The session object for the current target (nil if the chosen Claude isn't in
