@@ -291,18 +291,21 @@ struct ContentView: View {
             // when its pane is narrow, so we keep the natural (un-scaled) iPad font and
             // let the grid REFLOW into fewer columns / more rows. Only a genuinely short
             // iPhone screen drops to the compact font. Chips must never be scaled down.
-            let tall = geo.size.height >= 900        // iPad-class pane (full OR Split View)
-            let big = geo.size.width >= 980          // room for the full 6-column grid
+            // Big buttons on iPad, always — keyed to the device IDIOM, not height. (Height
+            // >= 900 failed on an 11" iPad in PORTRAIT, where the chip area is < 900pt, so
+            // it wrongly fell back to the tiny iPhone size.)
+            let tall = UIDevice.current.userInterfaceIdiom == .pad
             let all = voice.cheatGroups.flatMap { $0.items }
             let singles = all.filter { $0.pair == nil }
             let pairs = modePairs(from: all)
-            // Italian phrases run longer, so the compact iPhone font shrinks a touch.
-            let font: CGFloat = tall ? 18 : (italian ? 8 : 9.5)
-            let pairW: CGFloat = tall ? 300 : (italian ? 168 : 150)
-            // Column count tracks the available WIDTH so a narrow Split-View pane reflows
-            // to fewer (but full-size) columns instead of squeezing all six in. The full
-            // iPad keeps its 6-column grid; the iPhone tight-wraps (columns: 0).
-            let cols = tall ? (big ? 6 : max(2, min(5, Int(geo.size.width / 200)))) : 0
+            // iPad chips are BIG buttons — ~3× the compact iPhone font. Italian phrases run
+            // longer, so the iPhone compact size shrinks a touch.
+            let font: CGFloat = tall ? 30 : (italian ? 8 : 9.5)
+            let pairW: CGFloat = tall ? 480 : (italian ? 168 : 150)
+            // Column count tracks the available WIDTH. With the big iPad buttons a slot is
+            // ~340pt, so a narrow Split-View pane reflows to fewer (but full-size) columns.
+            // The iPhone tight-wraps (columns: 0).
+            let cols = tall ? max(2, min(6, Int(geo.size.width / 340))) : 0
             VStack(spacing: 0) {
               if settings.prefixMode { prefixBanner }
               ScrollView {
@@ -311,18 +314,16 @@ struct ContentView: View {
                         .font(.caption).foregroundStyle(.white.opacity(0.7))
                         .frame(maxWidth: .infinity).padding(.top, 24)
                 } else {
-                    // On an iPad we snap chips to a column grid so rows line up
-                    // vertically; the column count follows the pane width, so a narrow
-                    // Split-View pane reflows to fewer full-size columns (chips are never
-                    // scaled). The iPhone tight-packs (columns: 0) to fit its small screen.
-                    // Right-aligned: the output symbols line up near the right edge so
-                    // you can scan a column of symbols, then read the phrase to its left.
-                    FlowLayout(spacing: tall ? 6 : 3, columns: cols, rightAligned: true) {
+                    // On an iPad we snap chips to a column grid so rows line up vertically;
+                    // the column count follows the pane width. LEFT-justified so the big
+                    // buttons align in clean left-edged columns. The iPhone tight-packs
+                    // (columns: 0) to fit its small screen.
+                    FlowLayout(spacing: tall ? 8 : 3, columns: cols, rightAligned: false) {
                         ForEach(singles) { singleCell($0, fontSize: font) }
                         ForEach(pairs) { pairCell($0, fontSize: font, width: pairW) }
                     }
                     .padding(10)
-                    .frame(maxWidth: .infinity, minHeight: geo.size.height - (settings.prefixMode ? 40 : 0), alignment: .trailing)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height - (settings.prefixMode ? 40 : 0), alignment: .leading)
                 }
               }
             }
