@@ -522,7 +522,8 @@ struct ContentView: View {
                 .buttonStyle(.plain)
             }
             // Row 2 — the session transcript: a resizable, scrollable terminal-style box.
-            TranscriptView(lines: voice.finals, height: $transcriptHeight)
+            TranscriptView(lines: voice.finals, height: $transcriptHeight,
+                           onClear: { voice.clearTranscript() })
             // Row 3 — finger-sized controls.
             HStack(spacing: 12) {
                 Button { tapFeedback(); toggleMic() } label: {
@@ -648,15 +649,37 @@ struct ContentView: View {
 struct TranscriptView: View {
     let lines: [String]              // newest-first, as VoiceStream stores them
     @Binding var height: Double
+    var onClear: () -> Void
 
     private let minHeight: Double = 90
     private let maxHeight: Double = 460
     private let bottomID = "transcript-bottom"
     @State private var dragStart: Double? = nil
+    @State private var confirmClear = false
 
     var body: some View {
         let ordered = Array(lines.reversed())   // chronological: oldest → newest
         VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Text("TRANSCRIPT").font(.caption2.weight(.heavy))
+                    .foregroundStyle(.white.opacity(0.5))
+                Spacer(minLength: 0)
+                Button(role: .destructive) { confirmClear = true } label: {
+                    Label("Clear transcript log", systemImage: "trash")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(lines.isEmpty ? 0.3 : 0.75))
+                .disabled(lines.isEmpty)
+            }
+            .padding(.horizontal, 4).padding(.bottom, 4)
+            .confirmationDialog("Clear the entire transcript log?",
+                                isPresented: $confirmClear, titleVisibility: .visible) {
+                Button("Clear transcript log", role: .destructive) { onClear() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes the whole session transcript. It can't be undone.")
+            }
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 3) {

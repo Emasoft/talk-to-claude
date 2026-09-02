@@ -51,8 +51,16 @@ final class VoiceStream: ObservableObject {
     // "never reached the server" (usually Tailscale/VPN off) from a mid-session drop.
     private var everConnected = false
 
+    private let transcriptKey = "transcript_v1"
+
     init(settings: AppSettings) {
         self.settings = settings
+        // The transcript is PERMANENT: restore the whole saved session-log on launch so it
+        // survives app restarts and new recordings. Only the "Clear transcript log" button
+        // wipes it (see clearTranscript).
+        if let saved = UserDefaults.standard.array(forKey: transcriptKey) as? [String] {
+            finals = saved
+        }
         // Populate the cheat sheet immediately: prefer the last-cached server copy,
         // else the bundled default. It refreshes from the server when we connect.
         let cached = UserDefaults.standard.data(forKey: "cheatsheet_v6")
@@ -64,6 +72,18 @@ final class VoiceStream: ObservableObject {
         }
     }
 
+    /// Persist the running transcript so it survives relaunches (permanent log).
+    private func saveTranscript() {
+        UserDefaults.standard.set(finals, forKey: transcriptKey)
+    }
+
+    /// Wipe the transcript log — the ONLY thing that clears it (the "Clear transcript log"
+    /// button). A new recording never resets it.
+    func clearTranscript() {
+        finals.removeAll()
+        UserDefaults.standard.removeObject(forKey: transcriptKey)
+    }
+
     func start(session: String) {
         wantListening = true
         reconnectAttempts = 0
@@ -72,7 +92,7 @@ final class VoiceStream: ObservableObject {
         transcribing = false
         flushClosePending = false
         level = 0
-        finals.removeAll()
+        // NB: do NOT clear finals — the transcript is a permanent log across recordings.
         connect(session: session)
     }
 
@@ -274,6 +294,7 @@ final class VoiceStream: ObservableObject {
             if let line = obj["text"] as? String, !line.isEmpty {
                 finals.insert(line, at: 0)
                 if finals.count > 500 { finals.removeLast() }   // whole-session scrollback
+                saveTranscript()                                 // permanent log
             }
             // Surface tmux-injection failures: the words were heard but never
             // reached Claude (e.g. the target session was killed).

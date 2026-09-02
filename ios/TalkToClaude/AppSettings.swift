@@ -41,7 +41,7 @@ final class AppSettings: ObservableObject {
         port = store.string(forKey: "port") ?? "8765"
         token = store.string(forKey: "token") ?? kDefaultToken
         session = store.string(forKey: "session") ?? ""   // "" = no Claude chosen yet
-        pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 0.7
+        pauseThreshold = store.object(forKey: "pauseThreshold") as? Double ?? 2.0
         autoSend = store.object(forKey: "autoSend") as? Bool ?? false
         prefixMode = store.object(forKey: "prefixMode") as? Bool ?? true
     }

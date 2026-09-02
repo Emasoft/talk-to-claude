@@ -76,13 +76,17 @@ from voice_commands import cheatsheet, interpret, looks_like_hallucination, rend
 # CLAUDE_VOICE_TOKEN or --token.
 DEFAULT_TOKEN = "mMfRuOWn9rGWskJOnI4HkrTwReVtblyg"
 # ASR backend (--backend):
-#  • whisper (DEFAULT): Whisper-large-v3-turbo on MLX — 99 languages, MIT-licensed
-#    and free. The only backend the standard one-line installer sets up.
+#  • whisper (DEFAULT): Whisper large-v3 (FULL, not turbo) on MLX — 99 languages,
+#    MIT-licensed and free. Full large-v3 is chosen over the turbo distill because it
+#    handles ACCENTS/DIALECTS markedly better (Italian-American, Latin-American Spanish,
+#    British English, etc.); turbo drops decoder layers and degrades on those. The cost
+#    is ~2–3× slower per utterance — acceptable, and Phase-3 raw-then-corrected streaming
+#    hides most of the perceived latency. Override with --model for the turbo variant.
 #  • parakeet (OPTIONAL): NVIDIA Parakeet TDT 0.6b v3 — 25 European languages incl.
 #    Italian, RNN-T, faster, fewer hallucinations. Requires the optional dependency
 #    (`uv sync --extra parakeet`); parakeet_mlx is imported lazily (see _load_backend
 #    and _transcribe_parakeet) so the server runs fine when it isn't installed.
-WHISPER_MODEL_ID = "mlx-community/whisper-large-v3-turbo"
+WHISPER_MODEL_ID = "mlx-community/whisper-large-v3-mlx"
 PARAKEET_MODEL_ID = "mlx-community/parakeet-tdt-0.6b-v3"
 DEFAULT_BACKEND = "whisper"
 ALLOWED_LANGS = {"en", "it"}   # Whisper-only: drop other-language noise hallucinations
@@ -1209,7 +1213,7 @@ async def handle_stream(request):
         silence_hold = float(cfg.get("silence_hold") or 0.7)
     except (TypeError, ValueError):
         silence_hold = 0.7
-    silence_hold = max(0.3, min(silence_hold, 3.0))
+    silence_hold = max(0.3, min(silence_hold, 5.0))   # up to 5s pause before ending an utterance
     auto_send = bool(cfg.get("auto_send"))
     # prefix_mode = literal-by-default; commands need the "command" prefix (see voice_commands).
     prefix_mode = bool(cfg.get("prefix_mode"))
